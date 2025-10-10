@@ -17,7 +17,8 @@ const RESPONSE_PATHS_DEFAULT = ['.message.content'];
 
 const DEFAULT_LOG_LEVEL   = 'info';
 const DEFAULT_INSPECT_MODE = 'both';
-const DEFAULT_REDACT_MODE  = 'on';
+const DEFAULT_REDACT_MODE  = 'both';
+const DEFAULT_FORWARD_MODE = 'sequential';
 
 /* --------------------------- Response helpers ----------------------------- */
 
@@ -234,6 +235,9 @@ async function handle(r) {
   const responsePaths  = (keyvalConfig.responsePaths && keyvalConfig.responsePaths.length)
     ? keyvalConfig.responsePaths
     : RESPONSE_PATHS_DEFAULT;
+  const forwardBase    = keyvalConfig.requestForwardMode || DEFAULT_FORWARD_MODE;
+  const forwardModeVar = readVar(r, 'sideband_request_forward', forwardBase);
+  const requestForwardMode = String(forwardModeVar).toLowerCase();
 
   const log = makeLogger({ log: varLevel, r });
   let reqBodyText = '';
@@ -248,18 +252,27 @@ async function handle(r) {
   const inspectResponseEnabled = isModeEnabled(inspectMode, 'response');
   const redactRequestEnabled = isModeEnabled(redactMode, 'request');
   const redactResponseEnabled = isModeEnabled(redactMode, 'response');
+  const wantParallel = requestForwardMode === 'parallel';
+  const parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled;
 
   try {
     log(`sideband: ${r.method} ${r.uri} from ${r.remoteAddress}`, 'info');
     log(`headersIn: ${safeJson(r.headersIn)}`, 'debug');
     log(`inspect mode: ${inspectMode}`, 'info');
     log(`redact mode: ${redactMode}`, 'info');
+    log(`forward mode: ${requestForwardMode}`, 'info');
+    if (wantParallel && !inspectRequestEnabled) {
+      log({ step: 'forward_mode:degraded', reason: 'request inspection disabled' }, 'debug');
+    }
+    if (wantParallel && redactRequestEnabled) {
+      log({ step: 'forward_mode:degraded', reason: 'request redaction enabled' }, 'info');
+    }
     log({ request_paths: requestPaths, response_paths: responsePaths }, 'debug');
 
     const { bodyText } = getRequestBody(r, log);
     reqBodyText = bodyText;
 
-    const requestInspection = await runInspectionPhase({
+    const requestInspectionPromise = runInspectionPhase({
       phase: 'request',
       bodyText: reqBodyText,
       paths: requestPaths,
@@ -269,14 +282,45 @@ async function handle(r) {
       sideband
     });
 
-    if (requestInspection.status === 'blocked') {
-      return blockAndReturn(r, log, requestInspection.outcome, requestInspection.details);
-    }
-    if (requestInspection.bodyText !== undefined) {
-      reqBodyText = requestInspection.bodyText;
-    }
+    let requestInspection;
+    let backend;
 
-    const backend = await fetchBackend(r, log, reqBodyText);
+    if (parallelForward) {
+      log({ step: 'forward_mode:parallel_start' }, 'debug');
+      const backendPromise = fetchBackend(r, log, reqBodyText).then(
+        (result) => result,
+        (error) => {
+          log({ step: 'backend:parallel_error', error: String(error) }, 'err');
+          throw error;
+        }
+      );
+
+      requestInspection = await requestInspectionPromise;
+
+      if (requestInspection.status === 'blocked') {
+        backendPromise.catch(() => {});
+        return blockAndReturn(r, log, requestInspection.outcome, requestInspection.details);
+      }
+      if (requestInspection.bodyText !== undefined && requestInspection.bodyText !== reqBodyText) {
+        log({ step: 'forward_mode:redaction_ignored', note: 'request already dispatched upstream' }, 'warn');
+      }
+      if (requestInspection.bodyText !== undefined) {
+        reqBodyText = requestInspection.bodyText;
+      }
+
+      backend = await backendPromise;
+    } else {
+      requestInspection = await requestInspectionPromise;
+
+      if (requestInspection.status === 'blocked') {
+        return blockAndReturn(r, log, requestInspection.outcome, requestInspection.details);
+      }
+      if (requestInspection.bodyText !== undefined) {
+        reqBodyText = requestInspection.bodyText;
+      }
+
+      backend = await fetchBackend(r, log, reqBodyText);
+    }
     let respBodyText = (typeof backend.body === 'string')
       ? backend.body
       : (backend.body ? String(backend.body) : '');

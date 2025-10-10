@@ -211,21 +211,26 @@ export function extractJoin(root, searches, delimiter, opts) {
 
 export const SCAN_CONFIG_DEFAULTS = {
   inspectMode: 'both',
-  redactMode: 'on',
+  redactMode: 'both',
   logLevel: 'info',
   requestPaths: ['.messages[-1].content'],
-  responsePaths: ['.message.content']
+  responsePaths: ['.message.content'],
+  requestForwardMode: 'sequential'
 };
 
 export const SCAN_CONFIG_ENUMS = {
   inspectMode: ['off', 'request', 'response', 'both'],
-  redactMode: ['off', 'on'],
-  logLevel: ['debug', 'info', 'warn', 'err']
+  redactMode: ['off', 'request', 'response', 'both'],
+  logLevel: ['debug', 'info', 'warn', 'err'],
+  requestForwardMode: ['sequential', 'parallel']
 };
 
-function normalizeEnum(value, allowed, fallback) {
+function normalizeEnum(value, allowed, fallback, alias) {
   if (typeof value !== 'string') return fallback;
-  const normalized = value.toLowerCase();
+  let normalized = value.toLowerCase();
+  if (alias && alias[normalized]) {
+    normalized = alias[normalized];
+  }
   for (let i = 0; i < allowed.length; i++) {
     if (normalized === allowed[i]) {
       return normalized;
@@ -287,7 +292,8 @@ export function readScanConfig(r) {
     redactMode: normalizeEnum(
       readVariable(r, 'scan_config_redact_mode'),
       SCAN_CONFIG_ENUMS.redactMode,
-      SCAN_CONFIG_DEFAULTS.redactMode
+      SCAN_CONFIG_DEFAULTS.redactMode,
+      { on: 'both', true: 'both' }
     ),
     logLevel: normalizeEnum(
       readVariable(r, 'scan_config_log_level'),
@@ -301,6 +307,11 @@ export function readScanConfig(r) {
     responsePaths: parsePathsVariable(
       readVariable(r, 'scan_config_response_paths'),
       SCAN_CONFIG_DEFAULTS.responsePaths
+    ),
+    requestForwardMode: normalizeEnum(
+      readVariable(r, 'scan_config_request_forward_mode'),
+      SCAN_CONFIG_ENUMS.requestForwardMode,
+      SCAN_CONFIG_DEFAULTS.requestForwardMode
     )
   };
 }
@@ -330,7 +341,8 @@ export function validateConfigPatch(patch) {
     const mode = normalizeEnum(
       String(patch.redactMode),
       SCAN_CONFIG_ENUMS.redactMode,
-      undefined
+      undefined,
+      { on: 'both', true: 'both' }
     );
     if (!mode) {
       errors.push('redactMode must be one of: ' + SCAN_CONFIG_ENUMS.redactMode.join(', '));
@@ -367,6 +379,19 @@ export function validateConfigPatch(patch) {
       errors.push('responsePaths must contain at least one JSON path string.');
     } else {
       updates.responsePaths = normalized;
+    }
+  }
+
+  if (patch.requestForwardMode !== undefined) {
+    const mode = normalizeEnum(
+      String(patch.requestForwardMode),
+      SCAN_CONFIG_ENUMS.requestForwardMode,
+      undefined
+    );
+    if (!mode) {
+      errors.push('requestForwardMode must be one of: ' + SCAN_CONFIG_ENUMS.requestForwardMode.join(', '));
+    } else {
+      updates.requestForwardMode = mode;
     }
   }
 
@@ -419,6 +444,15 @@ export function applyConfigPatch(r, updates) {
       applied.responsePaths = updates.responsePaths;
     } catch (err) {
       applied.responsePathsError = String(err);
+    }
+  }
+
+  if (updates.requestForwardMode !== undefined) {
+    try {
+      r.variables.scan_config_request_forward_mode = updates.requestForwardMode;
+      applied.requestForwardMode = updates.requestForwardMode;
+    } catch (err) {
+      applied.requestForwardModeError = String(err);
     }
   }
 

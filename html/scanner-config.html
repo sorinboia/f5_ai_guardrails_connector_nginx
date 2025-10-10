@@ -287,6 +287,7 @@
         if (!config) return null;
         const chips = [
           { label: 'Inspect', value: config.inspectMode },
+          { label: 'Forwarding', value: config.requestForwardMode || '—' },
           { label: 'Redact', value: config.redactMode },
           { label: 'Log Level', value: config.logLevel },
           { label: 'Request Paths', value: (config.requestPaths || []).length },
@@ -313,7 +314,7 @@
         const [config, setConfig] = useState(null);
         const [serverConfig, setServerConfig] = useState(null);
         const [defaults, setDefaults] = useState(null);
-        const [options, setOptions] = useState({ inspectMode: [], redactMode: [], logLevel: [] });
+        const [options, setOptions] = useState({ inspectMode: [], redactMode: [], logLevel: [], requestForwardMode: [] });
         const [updatedAt, setUpdatedAt] = useState(null);
         const [saving, setSaving] = useState(false);
         const [activeSection, setActiveSection] = useState(NAV_SECTIONS[0].id);
@@ -333,6 +334,7 @@
 
         const normalizeConfig = cfg => ({
           inspectMode: (cfg && cfg.inspectMode) || '',
+          requestForwardMode: (cfg && cfg.requestForwardMode) || '',
           redactMode: (cfg && cfg.redactMode) || '',
           logLevel: (cfg && cfg.logLevel) || '',
           requestPaths: (cfg && cfg.requestPaths ? cfg.requestPaths.filter(Boolean).map(item => item.trim()) : []),
@@ -346,6 +348,7 @@
 
         const derivedOptions = useMemo(() => ({
           inspectMode: options.inspectMode || [],
+          requestForwardMode: options.requestForwardMode || [],
           redactMode: options.redactMode || [],
           logLevel: options.logLevel || []
         }), [options]);
@@ -430,6 +433,7 @@
           if (!defaults) return;
           setConfig({
             inspectMode: defaults.inspectMode,
+            requestForwardMode: defaults.requestForwardMode,
             redactMode: defaults.redactMode,
             logLevel: defaults.logLevel,
             requestPaths: [...(defaults.requestPaths || [])],
@@ -451,6 +455,7 @@
           setStatus({ tone: 'loading', message: 'Saving changes…' });
           const payload = {
             inspectMode: config.inspectMode,
+            requestForwardMode: config.requestForwardMode,
             redactMode: config.redactMode,
             logLevel: config.logLevel,
             requestPaths: (config.requestPaths || []).map(item => item.trim()).filter(Boolean),
@@ -539,6 +544,13 @@
                     options={derivedOptions.inspectMode}
                     value={config.inspectMode}
                     onChange={value => handleSelectChange('inspectMode', value)}
+                  />
+                  <SelectField
+                    label="Request Forwarding"
+                    helper="Sequential waits for scan results (required when request redaction is enabled). Parallel dispatches upstream immediately and is available when request redaction is off."
+                    options={derivedOptions.requestForwardMode}
+                    value={config.requestForwardMode}
+                    onChange={value => handleSelectChange('requestForwardMode', value)}
                   />
                 </SectionCard>
 
