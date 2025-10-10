@@ -3,6 +3,7 @@ export default { handle };
 import { isModeEnabled, makeLogger, readScanConfig, readVar, safeJson, safeJsonParse } from './utils.js';
 import { callSideband } from './sideband_client.js';
 import { applyRedactions, collectRedactionPlan, extractContextPayload } from './redaction.js';
+import { recordSample } from './collector_store.js';
 
 /* ----------------------------- Configuration ------------------------------ */
 
@@ -297,6 +298,19 @@ async function handle(r) {
     if (responseInspection.bodyText !== undefined) {
       respBodyText = responseInspection.bodyText;
       backend.body = respBodyText;
+    }
+
+    try {
+      const result = recordSample(
+        r,
+        { requestBody: reqBodyText, responseBody: respBodyText },
+        { log: varLevel, r }
+      );
+      if (result && result.recorded) {
+        log({ step: 'collector:captured', remaining: result.remaining, total: result.total }, 'info');
+      }
+    } catch (err) {
+      log({ step: 'collector:record_failed', error: String(err) }, 'err');
     }
 
     return sendBackendToClient(r, backend, log);

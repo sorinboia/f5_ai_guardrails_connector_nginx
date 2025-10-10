@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Guardrails Scan Configuration</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      window.tailwind = window.tailwind || {};
+      window.tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: {
+                DEFAULT: '#2563eb',
+                dark: '#1d4ed8'
+              }
+            }
+          }
+        }
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-slate-100 text-slate-900">
+    <div class="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 py-10">
+      <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <header class="mb-10 text-center">
+          <p class="text-sm uppercase tracking-wide text-slate-500">Calypso Guardrails</p>
+          <h1 class="mt-2 text-4xl font-semibold text-slate-900">Scanning Control Panel</h1>
+          <p class="mt-4 text-base text-slate-600">
+            Refine how the proxy inspects traffic, redacts sensitive content, and records telemetry. Updates persist immediately to the NGINX key-value store.
+          </p>
+        </header>
+        <div id="root"></div>
+      </div>
+    </div>
+
+    <script type="text/babel" data-presets="react">
+      const { useState, useEffect, useMemo, useRef } = React;
+
+      const NAV_SECTIONS = [
+        { id: 'overview', label: 'Overview' },
+        { id: 'inspection', label: 'Inspection Modes' },
+        { id: 'extraction', label: 'Extraction Paths' },
+        { id: 'telemetry', label: 'Redaction & Logging' }
+      ];
+
+      const ICONS = {
+        loading: '⏳',
+        success: '✅',
+        error: '⚠️',
+        info: 'ℹ️'
+      };
+
+      const toneClasses = {
+        loading: 'border-slate-300 bg-slate-100 text-slate-600',
+        success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        error: 'border-rose-200 bg-rose-50 text-rose-700',
+        info: 'border-sky-200 bg-sky-50 text-sky-700'
+      };
+
+      const ToastStack = ({ toasts, dismiss }) => (
+        <div className="fixed top-6 right-6 z-50 space-y-3">
+          {toasts.map(toast => (
+            <div
+              key={toast.id}
+              className={`flex items-start gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur ${toneClasses[toast.tone] || toneClasses.info}`}
+            >
+              <span className="text-xl leading-none">{ICONS[toast.tone] || ICONS.info}</span>
+              <div className="flex-1 text-sm">{toast.message}</div>
+              <button
+                type="button"
+                className="rounded-md p-1 text-xs text-slate-500 hover:text-slate-700"
+                onClick={() => dismiss(toast.id)}
+                aria-label="Dismiss notification"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      );
+
+      const StatusBanner = ({ status }) => {
+        if (!status.message) return null;
+        const tone = toneClasses[status.tone] || toneClasses.info;
+        return (
+          <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-sm ${tone}`}>
+            <span className="text-lg leading-none">{ICONS[status.tone] || ICONS.info}</span>
+            <span>{status.message}</span>
+          </div>
+        );
+      };
+
+      const SelectField = ({ label, helper, options, value, onChange }) => (
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-slate-700">{label}</label>
+          <select
+            className="block w-full rounded-lg border-slate-300 bg-white focus:border-primary focus:ring-primary"
+            value={value}
+            onChange={event => onChange(event.target.value)}
+          >
+            {options.map(option => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+          {helper && <p className="text-sm text-slate-500">{helper}</p>}
+        </div>
+      );
+
+      const SectionCard = React.forwardRef(({ id, title, description, children }, ref) => (
+        <section
+          ref={ref}
+          id={id}
+          className="scroll-mt-32 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+        >
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-900">{title}</h2>
+              {description && <p className="mt-2 text-sm text-slate-500">{description}</p>}
+            </div>
+          </div>
+          <div className="space-y-6">{children}</div>
+        </section>
+      ));
+
+      const PathListEditor = ({ label, helper, paths, onChange }) => {
+        const [draft, setDraft] = useState(() => (paths && paths.length ? paths : ['']));
+
+        useEffect(() => {
+          setDraft(paths && paths.length ? paths : ['']);
+        }, [paths]);
+
+        const update = (index, next) => {
+          const copy = [...draft];
+          copy[index] = next;
+          setDraft(copy);
+          onChange(copy);
+        };
+
+        const remove = index => {
+          const copy = draft.filter((_, idx) => idx !== index);
+          const next = copy.length ? copy : [''];
+          setDraft(next);
+          onChange(next);
+        };
+
+        const add = () => {
+          const copy = [...draft, ''];
+          setDraft(copy);
+          onChange(copy);
+        };
+
+        const move = (index, direction) => {
+          const target = index + direction;
+          if (target < 0 || target >= draft.length) return;
+          const copy = [...draft];
+          const temp = copy[target];
+          copy[target] = copy[index];
+          copy[index] = temp;
+          setDraft(copy);
+          onChange(copy);
+        };
+
+        return (
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">{label}</p>
+                {helper && <p className="text-sm text-slate-500">{helper}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={add}
+                className="inline-flex items-center gap-2 rounded-lg border border-primary px-3 py-1.5 text-sm font-medium text-primary shadow-sm hover:bg-primary/10"
+              >
+                <span className="text-base leading-none">＋</span>
+                Add Selector
+              </button>
+            </div>
+            <div className="space-y-3">
+              {draft.map((path, index) => {
+                const trimmed = (path || '').trim();
+                const hasError = trimmed.length === 0;
+                return (
+                  <div
+                    key={index}
+                    className={`flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center ${
+                      hasError ? 'border-rose-200 bg-rose-50/40' : 'border-slate-200'
+                    }`}
+                  >
+                    <div className="flex w-full items-center gap-3">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
+                        {index + 1}
+                      </span>
+                      <input
+                        type="text"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-primary focus:ring-primary"
+                        placeholder=".messages[-1].content"
+                        value={path}
+                        onChange={event => update(index, event.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 self-start sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => move(index, -1)}
+                        className="rounded-md border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                        disabled={index === 0}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => move(index, 1)}
+                        className="rounded-md border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                        disabled={index === draft.length - 1}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(index)}
+                        className="rounded-md border border-rose-200 px-3 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-40"
+                        disabled={draft.length === 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {hasError && (
+                      <p className="text-xs text-rose-600 sm:pl-11">
+                        Selector cannot be empty.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      };
+
+      const StickyNav = ({ activeSection, onNavigate, isDirty }) => (
+        <aside className="lg:sticky lg:top-24">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-semibold text-slate-600">Configuration Sections</p>
+            <nav className="mt-4 space-y-1">
+              {NAV_SECTIONS.map(item => {
+                const isActive = activeSection === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onNavigate(item.id)}
+                    aria-current={isActive ? 'true' : 'false'}
+                    className={`group flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm font-medium transition ${
+                      isActive ? 'text-primary' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span
+                      className={`h-2 w-2 rounded-full border transition ${
+                        isActive
+                          ? 'border-primary bg-primary'
+                          : 'border-slate-300 bg-transparent group-hover:border-slate-400'
+                      }`}
+                    ></span>
+                    <span className="flex-1">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+            {isDirty && (
+              <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                Unsaved changes detected. Remember to save before leaving.
+              </p>
+            )}
+          </div>
+        </aside>
+      );
+
+      const SummaryChips = ({ config }) => {
+        if (!config) return null;
+        const chips = [
+          { label: 'Inspect', value: config.inspectMode },
+          { label: 'Redact', value: config.redactMode },
+          { label: 'Log Level', value: config.logLevel },
+          { label: 'Request Paths', value: (config.requestPaths || []).length },
+          { label: 'Response Paths', value: (config.responsePaths || []).length }
+        ];
+        return (
+          <div className="flex flex-wrap gap-3">
+            {chips.map((chip, index) => (
+              <span
+                key={index}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-1.5 text-xs font-semibold text-slate-600"
+              >
+                <span className="uppercase tracking-wide text-[0.65rem] text-slate-400">{chip.label}</span>
+                <span>{chip.value}</span>
+              </span>
+            ))}
+          </div>
+        );
+      };
+
+      const ConfigApp = () => {
+        const sectionRefs = useRef({});
+        const [status, setStatus] = useState({ tone: 'loading', message: 'Loading configuration…' });
+        const [config, setConfig] = useState(null);
+        const [serverConfig, setServerConfig] = useState(null);
+        const [defaults, setDefaults] = useState(null);
+        const [options, setOptions] = useState({ inspectMode: [], redactMode: [], logLevel: [] });
+        const [updatedAt, setUpdatedAt] = useState(null);
+        const [saving, setSaving] = useState(false);
+        const [activeSection, setActiveSection] = useState(NAV_SECTIONS[0].id);
+        const [toasts, setToasts] = useState([]);
+
+        const pushToast = (tone, message) => {
+          const id = Date.now() + Math.random();
+          setToasts(prev => [...prev, { id, tone, message }]);
+          setTimeout(() => {
+            setToasts(prev => prev.filter(toast => toast.id !== id));
+          }, 4200);
+        };
+
+        const dismissToast = id => {
+          setToasts(prev => prev.filter(toast => toast.id !== id));
+        };
+
+        const normalizeConfig = cfg => ({
+          inspectMode: (cfg && cfg.inspectMode) || '',
+          redactMode: (cfg && cfg.redactMode) || '',
+          logLevel: (cfg && cfg.logLevel) || '',
+          requestPaths: (cfg && cfg.requestPaths ? cfg.requestPaths.filter(Boolean).map(item => item.trim()) : []),
+          responsePaths: (cfg && cfg.responsePaths ? cfg.responsePaths.filter(Boolean).map(item => item.trim()) : [])
+        });
+
+        const isDirty = useMemo(() => {
+          if (!config || !serverConfig) return false;
+          return JSON.stringify(normalizeConfig(config)) !== JSON.stringify(normalizeConfig(serverConfig));
+        }, [config, serverConfig]);
+
+        const derivedOptions = useMemo(() => ({
+          inspectMode: options.inspectMode || [],
+          redactMode: options.redactMode || [],
+          logLevel: options.logLevel || []
+        }), [options]);
+
+        const registerSection = id => el => {
+          if (el) {
+            sectionRefs.current[id] = el;
+          }
+        };
+
+        const navigateTo = id => {
+          const element = sectionRefs.current[id];
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        };
+
+        const attachScrollSpy = () => {
+          const observer = new IntersectionObserver(
+            entries => {
+              const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+              if (visible.length) {
+                setActiveSection(visible[0].target.id);
+              }
+            },
+            {
+              rootMargin: '-40% 0px -55% 0px',
+              threshold: [0.1, 0.35, 0.6]
+            }
+          );
+          NAV_SECTIONS.forEach(item => {
+            const el = sectionRefs.current[item.id];
+            if (el) observer.observe(el);
+          });
+          return () => observer.disconnect();
+        };
+
+        useEffect(() => {
+          if (!config) return;
+          const detach = attachScrollSpy();
+          return detach;
+        }, [config]);
+
+        const fetchConfig = async () => {
+          try {
+            setStatus({ tone: 'loading', message: 'Loading configuration…' });
+            const response = await fetch('/config/api', {
+              headers: { Accept: 'application/json' }
+            });
+            if (!response.ok) {
+              throw new Error(`Request failed with status ${response.status}`);
+            }
+            const payload = await response.json();
+            setConfig(payload.config);
+            setServerConfig(payload.config);
+            setDefaults(payload.defaults);
+            setOptions(payload.options || {});
+            setUpdatedAt(new Date());
+            setStatus({ tone: 'success', message: 'Configuration loaded.' });
+            pushToast('success', 'Configuration loaded.');
+          } catch (error) {
+            console.error(error);
+            const message = `Unable to load configuration: ${error.message}`;
+            setStatus({ tone: 'error', message });
+            pushToast('error', message);
+          }
+        };
+
+        useEffect(() => {
+          fetchConfig();
+        }, []);
+
+        const handleSelectChange = (key, value) => {
+          setConfig(prev => ({ ...prev, [key]: value }));
+        };
+
+        const handlePathsChange = (key, values) => {
+          setConfig(prev => ({ ...prev, [key]: values }));
+        };
+
+        const resetToDefaults = () => {
+          if (!defaults) return;
+          setConfig({
+            inspectMode: defaults.inspectMode,
+            redactMode: defaults.redactMode,
+            logLevel: defaults.logLevel,
+            requestPaths: [...(defaults.requestPaths || [])],
+            responsePaths: [...(defaults.responsePaths || [])]
+          });
+          setStatus({ tone: 'info', message: 'Defaults staged locally. Save to persist.' });
+          pushToast('info', 'Defaults staged locally.');
+        };
+
+        const saveConfig = async event => {
+          event.preventDefault();
+          if (!config) return;
+          if (!isDirty) {
+            setStatus({ tone: 'info', message: 'No changes detected — nothing to save.' });
+            pushToast('info', 'No changes to save.');
+            return;
+          }
+          setSaving(true);
+          setStatus({ tone: 'loading', message: 'Saving changes…' });
+          const payload = {
+            inspectMode: config.inspectMode,
+            redactMode: config.redactMode,
+            logLevel: config.logLevel,
+            requestPaths: (config.requestPaths || []).map(item => item.trim()).filter(Boolean),
+            responsePaths: (config.responsePaths || []).map(item => item.trim()).filter(Boolean)
+          };
+          try {
+            const response = await fetch('/config/api', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+              const errPayload = await response.json().catch(() => ({}));
+              const message = errPayload.errors ? errPayload.errors.join('; ') : errPayload.message || `Request failed (${response.status})`;
+              throw new Error(message);
+            }
+            const data = await response.json();
+            setConfig(data.config);
+            setServerConfig(data.config);
+            setDefaults(data.defaults);
+            setOptions(data.options || options);
+            setUpdatedAt(new Date());
+            setStatus({ tone: 'success', message: 'Configuration saved successfully.' });
+            pushToast('success', 'Configuration saved.');
+          } catch (error) {
+            console.error(error);
+            const message = `Save failed: ${error.message}`;
+            setStatus({ tone: 'error', message });
+            pushToast('error', message);
+          } finally {
+            setSaving(false);
+          }
+        };
+
+        const statusSummary = useMemo(() => {
+          if (!config) return '—';
+          return updatedAt ? `Last updated ${updatedAt.toLocaleString()}` : 'Awaiting updates';
+        }, [config, updatedAt]);
+
+        if (!config || !defaults) {
+          return (
+            <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
+              <div className="space-y-4">
+                <div className="h-64 rounded-3xl bg-white/70 shadow-sm" />
+              </div>
+              <div className="space-y-6">
+                <StatusBanner status={status} />
+                <div className="grid gap-6 sm:grid-cols-2">
+                  {[...Array(4)].map((_, index) => (
+                    <div key={index} className="h-48 animate-pulse rounded-3xl bg-white shadow-sm"></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <>
+            <ToastStack toasts={toasts} dismiss={dismissToast} />
+            <form onSubmit={saveConfig} className="grid gap-8 lg:grid-cols-[280px_1fr]">
+              <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
+              <div className="space-y-10">
+                <SectionCard
+                  ref={registerSection('overview')}
+                  id="overview"
+                  title="Current Snapshot"
+                  description={statusSummary}
+                >
+                  <StatusBanner status={status} />
+                  <SummaryChips config={config} />
+                </SectionCard>
+
+                <SectionCard
+                  ref={registerSection('inspection')}
+                  id="inspection"
+                  title="Inspection Modes"
+                  description="Control which message directions are screened by the guardrails service."
+                >
+                  <SelectField
+                    label="Inspection Mode"
+                    helper="Select which portions of the conversation are inspected (request, response, or both)."
+                    options={derivedOptions.inspectMode}
+                    value={config.inspectMode}
+                    onChange={value => handleSelectChange('inspectMode', value)}
+                  />
+                </SectionCard>
+
+                <SectionCard
+                  ref={registerSection('extraction')}
+                  id="extraction"
+                  title="Extraction Paths"
+                  description="Define the JSON selectors used to extract text from requests and responses prior to scanning."
+                >
+                  <PathListEditor
+                    label="Request Selectors"
+                    helper="Selectors applied to the inbound payload (e.g. .messages[-1].content)."
+                    paths={config.requestPaths || []}
+                    onChange={value => handlePathsChange('requestPaths', value)}
+                  />
+                  <PathListEditor
+                    label="Response Selectors"
+                    helper="Selectors applied to backend responses prior to returning to clients."
+                    paths={config.responsePaths || []}
+                    onChange={value => handlePathsChange('responsePaths', value)}
+                  />
+                </SectionCard>
+
+                <SectionCard
+                  ref={registerSection('telemetry')}
+                  id="telemetry"
+                  title="Redaction & Logging"
+                  description="Configure automatic masking behavior and the verbosity of NJS logs."
+                >
+                  <SelectField
+                    label="Redaction Mode"
+                    helper="Enable redaction for request, response, both, or disable it entirely."
+                    options={derivedOptions.redactMode}
+                    value={config.redactMode}
+                    onChange={value => handleSelectChange('redactMode', value)}
+                  />
+                  <SelectField
+                    label="Log Level"
+                    helper="Choose how verbose the guardrails handler should be in the NGINX error log."
+                    options={derivedOptions.logLevel}
+                    value={config.logLevel}
+                    onChange={value => handleSelectChange('logLevel', value)}
+                  />
+                </SectionCard>
+
+                <div className="sticky bottom-4 z-40 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">Ready to apply your updates?</p>
+                      <p className="text-xs text-slate-500">Changes persist to the key-value store immediately after saving.</p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={resetToDefaults}
+                        className="inline-flex justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                      >
+                        Reset to Defaults
+                      </button>
+                      <button
+                        type="button"
+                        onClick={fetchConfig}
+                        className="inline-flex justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                      >
+                        Refresh from Server
+                      </button>
+                      <button
+                        type="submit"
+                        className={`inline-flex justify-center rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${isDirty ? '' : 'opacity-60'}`}
+                        aria-disabled={!isDirty}
+                        disabled={saving}
+                      >
+                        {saving ? 'Saving…' : 'Save Changes'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </>
+        );
+      };
+
+      const STATUS_TONES = {
+        success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        error: 'border-rose-200 bg-rose-50 text-rose-700',
+        info: 'border-sky-200 bg-sky-50 text-sky-700',
+        muted: 'border-slate-200 bg-white text-slate-600'
+      };
+
+      const VIEW_OPTIONS = [
+        { id: 'config', label: 'Scan Configuration' },
+        { id: 'collector', label: 'Payload Collector' }
+      ];
+
+      function classNames(...parts) {
+        return parts.filter(Boolean).join(' ');
+      }
+
+      function useAsyncCallback(callback) {
+        const [pending, setPending] = useState(false);
+        const wrapped = async (...args) => {
+          if (pending) return;
+          setPending(true);
+          try {
+            return await callback(...args);
+          } finally {
+            setPending(false);
+          }
+        };
+        return [wrapped, pending];
+      }
+
+      function SelectorBadge({ label, onRemove }) {
+        return (
+          <span className="inline-flex items-center gap-2 rounded-full bg-slate-200/80 px-2.5 py-1 text-xs text-slate-700">
+            <span className="font-mono">{label}</span>
+            {onRemove ? (
+              <button
+                type="button"
+                className="rounded-full px-1 text-slate-500 hover:bg-slate-300 hover:text-slate-800"
+                onClick={onRemove}
+                aria-label={`Remove selector ${label}`}
+              >
+                ✕
+              </button>
+            ) : null}
+          </span>
+        );
+      }
+
+      const SummaryPill = ({ label, value }) => (
+        <div className="flex flex-col rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
+          <span className="mt-1 text-lg font-semibold text-slate-800">{value}</span>
+        </div>
+      );
+
+      function TreeNode({ name, value, path, depth = 0, onSelect }) {
+        const isObject = value && typeof value === 'object';
+        const isArray = Array.isArray(value);
+        const hasChildren = isObject || isArray;
+        const [open, setOpen] = useState(depth < 1);
+
+        const preview = useMemo(() => {
+          if (value === null) return 'null';
+          if (isArray) return `Array(${value.length})`;
+          if (isObject) return 'Object';
+          if (typeof value === 'string') {
+            return `"${value.length > 40 ? value.slice(0, 37) + '…' : value}"`;
+          }
+          return String(value);
+        }, [value, isArray, isObject]);
+
+        const toggle = event => {
+          event.stopPropagation();
+          setOpen(prev => !prev);
+        };
+
+        const handleSelect = event => {
+          event.stopPropagation();
+          if (onSelect && path) {
+            onSelect(path);
+          }
+        };
+
+        return (
+          <div className="ml-4">
+            <div
+              className={classNames(
+                'group flex items-center gap-2 rounded-md px-2 py-1 text-sm transition',
+                'hover:bg-slate-100'
+              )}
+            >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  className="h-5 w-5 rounded border border-slate-300 text-xs text-slate-600 hover:border-slate-400 hover:text-slate-800"
+                  aria-label={open ? 'Collapse node' : 'Expand node'}
+                >
+                  {open ? '−' : '+'}
+                </button>
+              ) : (
+                <span className="inline-flex h-5 w-5 items-center justify-center text-slate-300">•</span>
+              )}
+              <button
+                type="button"
+                onClick={handleSelect}
+                className="flex-1 text-left font-mono text-xs text-slate-700 group-hover:text-primary"
+              >
+                <span className="font-semibold text-slate-800">{name}</span>
+                <span className="ml-2 text-slate-500">{preview}</span>
+              </button>
+            </div>
+            {hasChildren && open ? (
+              <div className="border-l border-dashed border-slate-300 pl-4">
+                {isArray
+                  ? value.map((item, index) => {
+                      const childPath = path ? `${path}[${index}]` : `.[${index}]`;
+                      return (
+                        <TreeNode
+                          key={childPath}
+                          name={`[${index}]`}
+                          value={item}
+                          path={childPath}
+                          depth={depth + 1}
+                          onSelect={onSelect}
+                        />
+                      );
+                    })
+                  : Object.keys(value).map(childKey => {
+                      const childPath = path ? `${path}.${childKey}` : `.${childKey}`;
+                      return (
+                        <TreeNode
+                          key={childPath}
+                          name={childKey}
+                          value={value[childKey]}
+                          path={childPath}
+                          depth={depth + 1}
+                          onSelect={onSelect}
+                        />
+                      );
+                    })}
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+
+      function PayloadTree({ title, bodyText, onSelect }) {
+        const parsed = useMemo(() => {
+          if (!bodyText) return { kind: 'empty' };
+          try {
+            return { kind: 'json', value: JSON.parse(bodyText) };
+          } catch (_) {
+            return { kind: 'text' };
+          }
+        }, [bodyText]);
+
+        return (
+          <section className="space-y-3">
+            <header className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+              <span className="font-mono text-xs text-slate-500">{bodyText.length} bytes</span>
+            </header>
+            <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-inner">
+              {parsed.kind === 'json' ? (
+                <div className="space-y-2">
+                  {Array.isArray(parsed.value) ? (
+                    <TreeNode
+                      name="root"
+                      value={parsed.value}
+                      path=""
+                      depth={0}
+                      onSelect={path => onSelect(path || '.')}
+                    />
+                  ) : typeof parsed.value === 'object' && parsed.value !== null ? (
+                    Object.keys(parsed.value).length ? (
+                      Object.keys(parsed.value).map(key => (
+                        <TreeNode
+                          key={`.${key}`}
+                          name={key}
+                          value={parsed.value[key]}
+                          path={`.${key}`}
+                          depth={0}
+                          onSelect={onSelect}
+                        />
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">Object is empty.</p>
+                    )
+                  ) : (
+                    <div className="text-sm text-slate-600">
+                      Primitive: <span className="font-mono">{JSON.stringify(parsed.value)}</span>
+                    </div>
+                  )}
+                </div>
+              ) : parsed.kind === 'text' ? (
+                <pre className="max-h-64 overflow-auto rounded bg-slate-900/90 p-3 text-xs text-slate-100">
+{bodyText}
+                </pre>
+              ) : (
+                <p className="text-sm text-slate-500">No payload captured for this entry.</p>
+              )}
+            </div>
+          </section>
+        );
+      }
+
+      const MAX_SELECTORS = 12;
+
+      function CollectorApp() {
+        const [status, setStatus] = useState({ tone: 'muted', message: '' });
+        const [loading, setLoading] = useState(true);
+        const [collector, setCollector] = useState({ total: 0, remaining: 0, entries: [] });
+        const [config, setConfig] = useState({ requestPaths: [], responsePaths: [] });
+        const [requestSelectors, setRequestSelectors] = useState([]);
+        const [responseSelectors, setResponseSelectors] = useState([]);
+        const [collectInput, setCollectInput] = useState('3');
+        const [expandedEntries, setExpandedEntries] = useState([]);
+
+        const totalCaptured = collector.entries ? collector.entries.length : 0;
+        const quotaRemaining = collector.remaining || 0;
+
+        const notify = (tone, message) => setStatus({ tone, message });
+
+        const loadConfig = async () => {
+          const resp = await fetch('/config/api', { method: 'GET' });
+          if (!resp.ok) throw new Error('Failed to load config');
+          const data = await resp.json();
+          const cfg = data && data.config ? data.config : {};
+          setConfig(cfg);
+          setRequestSelectors(cfg.requestPaths || []);
+          setResponseSelectors(cfg.responsePaths || []);
+        };
+
+        const loadCollector = async () => {
+          const resp = await fetch('/collector/api', { method: 'GET' });
+          if (!resp.ok) throw new Error('Failed to load collector state');
+          const data = await resp.json();
+          setCollector({
+            total: data.total || 0,
+            remaining: data.remaining || 0,
+            entries: Array.isArray(data.entries) ? data.entries : []
+          });
+          setCollectInput(prev =>
+            prev === '' ? String(data.remaining || data.total || 0) : prev
+          );
+        };
+
+        useEffect(() => {
+          (async () => {
+            try {
+              await Promise.all([loadConfig(), loadCollector()]);
+              notify('info', 'Collector state synced.');
+            } catch (err) {
+              notify('error', err.message || 'Failed to load initial state.');
+            } finally {
+              setLoading(false);
+            }
+          })();
+        }, []);
+
+        const [handleCollect, collecting] = useAsyncCallback(async () => {
+          const parsed = parseInt(collectInput, 10);
+          if (!Number.isFinite(parsed) || parsed < 0) {
+            notify('error', 'Enter a non-negative count.');
+            return;
+          }
+          const capped = Math.min(parsed, MAX_SELECTORS * 4);
+          const resp = await fetch('/collector/api', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ count: capped })
+          });
+          if (!resp.ok) {
+            notify('error', 'Collector request failed.');
+            return;
+          }
+          const data = await resp.json();
+          setCollector({
+            total: data.total || 0,
+            remaining: data.remaining || 0,
+            entries: Array.isArray(data.entries) ? data.entries : []
+          });
+          setCollectInput(String(data.remaining || data.total || 0));
+          setExpandedEntries([]);
+          notify('success', `Collection armed for ${data.total || 0} pairs.`);
+        });
+
+        const [handleRefresh, refreshing] = useAsyncCallback(async () => {
+          try {
+            await loadCollector();
+            notify('info', 'Collector entries refreshed.');
+          } catch (err) {
+            notify('error', err.message || 'Refresh failed.');
+          }
+        });
+
+        const [handleSave, saving] = useAsyncCallback(async () => {
+          const payload = {
+            requestPaths: requestSelectors,
+            responsePaths: responseSelectors
+          };
+          const resp = await fetch('/config/api', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!resp.ok) {
+            notify('error', 'Failed to save selectors.');
+            return;
+          }
+          const data = await resp.json();
+          const cfg = data && data.config ? data.config : payload;
+          setConfig(cfg);
+          notify('success', 'Selectors saved to scan configuration.');
+        });
+
+        const addSelector = (target, selector) => {
+          if (!selector || selector === '.') return;
+          if (target === 'request') {
+            setRequestSelectors(prev => (prev.includes(selector) ? prev : [...prev, selector].slice(0, MAX_SELECTORS)));
+          } else {
+            setResponseSelectors(prev => (prev.includes(selector) ? prev : [...prev, selector].slice(0, MAX_SELECTORS)));
+          }
+        };
+
+        const removeSelector = (target, selector) => {
+          if (target === 'request') {
+            setRequestSelectors(prev => prev.filter(item => item !== selector));
+          } else {
+            setResponseSelectors(prev => prev.filter(item => item !== selector));
+          }
+        };
+
+        const isExpanded = id => expandedEntries.includes(id);
+
+        const toggleEntry = id => {
+          setExpandedEntries(prev =>
+            prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+          );
+        };
+
+        if (loading) {
+          return (
+            <div className="flex h-64 items-center justify-center rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <span className="text-sm text-slate-500">Loading collector interface…</span>
+            </div>
+          );
+        }
+
+        return (
+          <div className="space-y-8">
+            {status.message ? (
+              <div className={classNames('rounded-2xl border px-4 py-3 text-sm shadow-sm', STATUS_TONES[status.tone] || STATUS_TONES.muted)}>
+                {status.message}
+              </div>
+            ) : null}
+
+            <section className="grid gap-6 md:grid-cols-3">
+              <SummaryPill label="Captured" value={`${totalCaptured}`} />
+              <SummaryPill label="Remaining Quota" value={`${quotaRemaining}`} />
+              <SummaryPill label="Configured Collectors" value={`${collector.total || 0}`} />
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Pairs to capture</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={collectInput}
+                    onChange={event => setCollectInput(event.target.value)}
+                    className="w-32 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-primary focus:ring-primary"
+                  />
+                  <p className="text-xs text-slate-500">Collector resets existing samples when armed.</p>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleCollect}
+                    disabled={collecting}
+                    className={classNames(
+                      'inline-flex items-center justify-center rounded-lg px-5 py-2 text-sm font-semibold text-white shadow',
+                      'bg-blue-600 bg-primary',
+                      collecting ? 'opacity-70' : 'hover:bg-blue-700 hover:bg-primary-dark'
+                    )}
+                  >
+                    {collecting ? 'Arming…' : 'Collect Pairs'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={refreshing}
+                    className={classNames(
+                      'inline-flex items-center justify-center rounded-lg border border-slate-300 px-5 py-2 text-sm font-semibold text-slate-600',
+                      refreshing ? 'opacity-70' : 'hover:bg-slate-100'
+                    )}
+                  >
+                    {refreshing ? 'Refreshing…' : 'Refresh Entries'}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+              <header className="mb-4">
+                <h2 className="text-lg font-semibold text-slate-800">Selector Builder</h2>
+                <p className="text-sm text-slate-500">
+                  Click any key within a payload tree to append it to the appropriate selector list.
+                  You can capture up to {MAX_SELECTORS} selectors per side.
+                </p>
+              </header>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-700">Request Selectors</h3>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {requestSelectors.length ? (
+                      requestSelectors.map(selector => (
+                        <SelectorBadge
+                          key={selector}
+                          label={selector}
+                          onRemove={() => removeSelector('request', selector)}
+                        />
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">No request selectors chosen yet.</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-700">Response Selectors</h3>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {responseSelectors.length ? (
+                      responseSelectors.map(selector => (
+                        <SelectorBadge
+                          key={selector}
+                          label={selector}
+                          onRemove={() => removeSelector('response', selector)}
+                        />
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">No response selectors chosen yet.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className={classNames(
+                    'inline-flex items-center justify-center rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow',
+                    saving ? 'opacity-70' : 'hover:bg-emerald-700'
+                  )}
+                >
+                  {saving ? 'Saving…' : 'Save Selectors'}
+                </button>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+              <header className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">Collected Entries</h2>
+                  <p className="text-sm text-slate-500">
+                    Entries collapse by default. Click to expand and inspect full payloads.
+                  </p>
+                </div>
+                <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {totalCaptured} captured
+                </span>
+              </header>
+
+              {totalCaptured === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
+                  No payloads captured yet. Arm the collector above and exercise the proxy.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {collector.entries.map((entry, index) => {
+                    const entryId = entry.id || `entry-${index}`;
+                    const expanded = isExpanded(entryId);
+                    return (
+                      <article key={entryId} className="rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => toggleEntry(entryId)}
+                          className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          <span>
+                            Pair {index + 1} •{' '}
+                            <span className="font-normal text-slate-500">
+                              {entry.collected_at ? new Date(entry.collected_at).toLocaleString() : 'timestamp unknown'}
+                            </span>
+                          </span>
+                          <span className="text-xl text-slate-400">{expanded ? '−' : '+'}</span>
+                        </button>
+                        {expanded ? (
+                          <div className="grid gap-6 border-t border-slate-100 px-5 py-6 md:grid-cols-2">
+                            <PayloadTree
+                              title="Request Payload"
+                              bodyText={(entry.request && entry.request.body) || ''}
+                              onSelect={selector => addSelector('request', selector)}
+                            />
+                            <PayloadTree
+                              title="Response Payload"
+                              bodyText={(entry.response && entry.response.body) || ''}
+                              onSelect={selector => addSelector('response', selector)}
+                            />
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        );
+      }
+
+      const RootApp = () => {
+        const [activeView, setActiveView] = useState('config');
+        useEffect(() => {
+          document.title = activeView === 'collector'
+            ? 'Guardrails Payload Collector'
+            : 'Guardrails Scan Configuration';
+        }, [activeView]);
+
+        return (
+          <div className="space-y-10">
+            <div className="flex justify-center">
+              <div className="inline-flex rounded-full border border-slate-200 bg-white/80 p-1 shadow-sm">
+                {VIEW_OPTIONS.map(option => {
+                  const isActive = activeView === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setActiveView(option.id)}
+                      className={classNames(
+                        'mx-1 rounded-full px-4 py-2 text-sm font-semibold transition',
+                        isActive
+                          ? 'bg-blue-600 bg-primary text-white shadow hover:bg-blue-700 hover:bg-primary-dark'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {activeView === 'collector' ? <CollectorApp /> : <ConfigApp />}
+          </div>
+        );
+      };
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<RootApp />);
+    </script>
+  </body>
+</html>
