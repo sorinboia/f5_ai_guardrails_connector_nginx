@@ -1,56 +1,30 @@
 export default { handle };
 
-import { extractJoin, makeLogger, safeJson } from './utils.js';
+import { isModeEnabled, makeLogger, readScanConfig, readVar, safeJson, safeJsonParse } from './utils.js';
+import { callSideband } from './sideband_client.js';
+import { applyRedactions, collectRedactionPlan, extractContextPayload } from './redaction.js';
 
 /* ----------------------------- Configuration ------------------------------ */
 
-// Static defaults (can be overridden via nginx variables)
 const SIDEBAND_URL_DEFAULT    = 'https://www.us1.calypsoai.app/backend/v1/scans';
 const SIDEBAND_UA_DEFAULT     = 'njs-sideband/1.0';
 const SIDEBAND_BEARER_DEFAULT =
   'MDE5OThmNmEtMTE5ZS03MDdkLTg5OTktMTU0NDgzYzNiNDA4/FsEqxzRtAxO6oXwyEKEwI9GGf5qjGJu7owwKjUNXRkUVkkoxFbeXJpedcHZY9YsQC9aNOSj75dTOhKJA';
 
-// Selectors used when extracting content for scanning
-const REQUEST_PATHS  = ['.messages[-1].content'];
-// Adjust as needed for your backend responses
-const RESPONSE_PATHS = ['.message.content'];
+const REQUEST_PATHS_DEFAULT  = ['.messages[-1].content'];
+const RESPONSE_PATHS_DEFAULT = ['.message.content'];
 
-// Logging default; override with $sideband_log
-const DEFAULT_LOG_LEVEL = 'debug';
-
-// Inspecting default; override with $sideband_inspect
-// Allowed: 'request' | 'response' | 'both' | 'off'
+const DEFAULT_LOG_LEVEL   = 'info';
 const DEFAULT_INSPECT_MODE = 'both';
-
-/* --------------------------- Small helper utils --------------------------- */
-
-function readVar(r, name, fallback) {
-  try {
-    const v = r && r.variables && r.variables[name];
-    return (v === undefined || v === null || v === '') ? fallback : v;
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function safeJsonParse(s) {
-  try { return JSON.parse(s); } catch (_) { return undefined; }
-}
-
-function isOn(mode, target) {
-  if (!mode) return false;
-  if (mode === 'off') return false;
-  if (mode === 'both') return true;
-  return mode === target;
-}
+const DEFAULT_REDACT_MODE  = 'on';
 
 /* --------------------------- Response helpers ----------------------------- */
 
 function buildBlockedBody() {
   return {
     message: {
-      role: "assistant",
-      content: "F5 AI Guardrails blocked this request"
+      role: 'assistant',
+      content: 'F5 AI Guardrails blocked this request'
     }
   };
 }
@@ -82,17 +56,6 @@ function getRequestBody(r, log) {
   return { bodyBuf, bodyText };
 }
 
-function extractFromJSON(text, paths, log, label) {
-  const parsed = safeJsonParse(text);
-  if (!parsed) {
-    log(`${label}: not valid JSON; extracted empty string`, 'warn');
-    return '';
-  }
-  const joined = extractJoin(parsed, paths, ' ', { log, r: undefined });
-  log({ step: `${label}:extracted`, preview: joined.slice(0, 200) }, 'debug');
-  return joined;
-}
-
 function buildSidebandPayload(input) {
   return JSON.stringify({
     input,
@@ -103,36 +66,129 @@ function buildSidebandPayload(input) {
   });
 }
 
-async function callSideband(log, url, bearer, ua, payloadStr) {
-  const headers = {
-    'content-type': 'application/json; charset=utf-8',
-    'user-agent': ua,
-    'authorization': `Bearer ${bearer}`
-  };
-
-  log({ step: 'sideband:request', url, headers: { ...headers, authorization: '[redacted]' } }, 'debug');
-
-  const reply  = await ngx.fetch(url, { method: 'POST', headers, body: payloadStr });
-  const status = reply.status;
-  let text     = '';
-  try { text = await reply.text(); } catch (_) { /* ignore */ }
-
-  log({ step: 'sideband:response', status, preview: text.slice(0, 200) }, 'debug');
-  return { status, text };
-}
-
 function parseSidebandOutcome(sbStatus, sbText) {
   const sbJson  = safeJsonParse(sbText) || {};
   const outcome = (((sbJson || {}).result) || {}).outcome;
   return { outcome, sbJson };
 }
 
-function shouldBlock(outcome) {
-  return outcome !== 'cleared';
+function normalizeOutcome(outcome) {
+  return String(outcome || '').toLowerCase();
 }
 
-// Recreate the original request and send it to @backend as a subrequest.
-// Captures status, headers, and body so we can decide whether to pass/deny.
+async function runInspectionPhase(opts) {
+  const {
+    phase,
+    bodyText,
+    paths,
+    inspectEnabled,
+    redactEnabled,
+    log,
+    sideband
+  } = opts;
+
+  if (!inspectEnabled) {
+    return { status: 'skipped', bodyText };
+  }
+
+  const context = extractContextPayload(bodyText, paths, log, phase);
+  const payload = buildSidebandPayload(context.extracted);
+  const { status: sbStatus, text: sbText } =
+    await callSideband(log, sideband.url, sideband.bearer, sideband.ua, payload);
+
+  const { outcome, sbJson } = parseSidebandOutcome(sbStatus, sbText);
+  const normalizedOutcome = normalizeOutcome(outcome);
+
+  if (normalizedOutcome === 'flagged') {
+    return {
+      status: 'blocked',
+      outcome: normalizedOutcome,
+      details: {
+        sideband_status: sbStatus,
+        sideband_preview: (sbText || '').substring(0, 512),
+        reason: `${phase} outcome flagged`
+      }
+    };
+  }
+
+  if (normalizedOutcome === 'redacted') {
+    if (!redactEnabled) {
+      return {
+        status: 'blocked',
+        outcome: normalizedOutcome,
+        details: {
+          sideband_status: sbStatus,
+          sideband_preview: (sbText || '').substring(0, 512),
+          reason: `${phase} redaction disabled`
+        }
+      };
+    }
+
+    const plan = collectRedactionPlan(sbJson);
+    let redaction = {
+      applied: plan.matches.length === 0,
+      unmatched: 0,
+      text: undefined
+    };
+
+    if (plan.matches.length) {
+      redaction = applyRedactions(context, plan.matches, log, phase);
+    } else {
+      log({ step: `${phase}:redaction_skipped`, reason: 'no regex matches returned' }, 'info');
+    }
+
+    const redactionOk =
+      redaction.applied &&
+      redaction.unmatched === 0 &&
+      plan.unsupported.length === 0;
+
+    log({
+      step: `${phase}:redaction_status`,
+      failed_scanners: plan.failedCount,
+      matches: plan.matches.length,
+      unsupported: plan.unsupported.length,
+      applied: redaction.applied,
+      unmatched: redaction.unmatched,
+      success: redactionOk
+    }, 'info');
+
+    if (!redactionOk) {
+      return {
+        status: 'blocked',
+        outcome: normalizedOutcome,
+        details: {
+          sideband_status: sbStatus,
+          sideband_preview: (sbText || '').substring(0, 512),
+          failed_scanners: plan.failedCount,
+          unsupported_scanners: plan.unsupported,
+          redacted: redaction.applied || false,
+          unmatched_matches: redaction.unmatched
+        }
+      };
+    }
+
+    return {
+      status: 'redacted',
+      outcome: normalizedOutcome,
+      bodyText: redaction.text !== undefined ? redaction.text : bodyText
+    };
+  }
+
+  if (normalizedOutcome && normalizedOutcome !== 'cleared') {
+    return {
+      status: 'blocked',
+      outcome: normalizedOutcome,
+      details: {
+        sideband_status: sbStatus,
+        sideband_preview: (sbText || '').substring(0, 512),
+        reason: `unexpected ${phase} outcome: ${normalizedOutcome}`
+      }
+    };
+  }
+
+  return { status: 'cleared', outcome: normalizedOutcome, bodyText };
+}
+
 async function fetchBackend(r, log, bodyText) {
   const args = r.variables && r.variables.args ? r.variables.args : '';
   const opt  = { method: r.method, body: bodyText, args };
@@ -140,10 +196,8 @@ async function fetchBackend(r, log, bodyText) {
 
   const resp = await r.subrequest('/backend/', opt);
 
-  // In njs, subrequest reply typically has: status, headersOut, responseBody/responseText
   const status  = resp.status;
   const headers = resp.headersOut || {};
-  // Prefer responseBody (Buffer-like string) then responseText
   const body    = (resp.responseBody !== undefined) ? resp.responseBody
                 : (resp.responseText !== undefined ? resp.responseText : '');
 
@@ -151,7 +205,6 @@ async function fetchBackend(r, log, bodyText) {
   return { status, headers, body };
 }
 
-// Relay backend response to client (after we decide it's allowed).
 function sendBackendToClient(r, backend, log) {
   for (const k in backend.headers) {
     try {
@@ -165,70 +218,87 @@ function sendBackendToClient(r, backend, log) {
 /* -------------------------------- Handler --------------------------------- */
 
 async function handle(r) {
-  const varLevel       = readVar(r, 'sideband_log', DEFAULT_LOG_LEVEL);
-  const inspectModeVar = readVar(r, 'sideband_inspect', DEFAULT_INSPECT_MODE);
+  const keyvalConfig   = readScanConfig(r);
+  const configLogLevel = keyvalConfig.logLevel || DEFAULT_LOG_LEVEL;
+  const varLevel       = readVar(r, 'sideband_log', configLogLevel);
+  const inspectBase    = keyvalConfig.inspectMode || DEFAULT_INSPECT_MODE;
+  const inspectModeVar = readVar(r, 'sideband_inspect', inspectBase);
   const inspectMode    = String(inspectModeVar).toLowerCase();
+  const redactBase     = keyvalConfig.redactMode || DEFAULT_REDACT_MODE;
+  const redactModeVar  = readVar(r, 'sideband_redact', redactBase);
+  const redactMode     = String(redactModeVar).toLowerCase();
+  const requestPaths   = (keyvalConfig.requestPaths && keyvalConfig.requestPaths.length)
+    ? keyvalConfig.requestPaths
+    : REQUEST_PATHS_DEFAULT;
+  const responsePaths  = (keyvalConfig.responsePaths && keyvalConfig.responsePaths.length)
+    ? keyvalConfig.responsePaths
+    : RESPONSE_PATHS_DEFAULT;
 
   const log = makeLogger({ log: varLevel, r });
+  let reqBodyText = '';
+
+  const sideband = {
+    url: readVar(r, 'sideband_url',    SIDEBAND_URL_DEFAULT),
+    ua: readVar(r, 'sideband_ua',     SIDEBAND_UA_DEFAULT),
+    bearer: readVar(r, 'sideband_bearer', SIDEBAND_BEARER_DEFAULT)
+  };
+
+  const inspectRequestEnabled = isModeEnabled(inspectMode, 'request');
+  const inspectResponseEnabled = isModeEnabled(inspectMode, 'response');
+  const redactRequestEnabled = isModeEnabled(redactMode, 'request');
+  const redactResponseEnabled = isModeEnabled(redactMode, 'response');
 
   try {
-    // Config (allow per-env overrides via nginx vars)
-    const SIDEBAND_URL    = readVar(r, 'sideband_url',    SIDEBAND_URL_DEFAULT);
-    const SIDEBAND_UA     = readVar(r, 'sideband_ua',     SIDEBAND_UA_DEFAULT);
-    const SIDEBAND_BEARER = readVar(r, 'sideband_bearer', SIDEBAND_BEARER_DEFAULT);
-
     log(`sideband: ${r.method} ${r.uri} from ${r.remoteAddress}`, 'info');
     log(`headersIn: ${safeJson(r.headersIn)}`, 'debug');
     log(`inspect mode: ${inspectMode}`, 'info');
+    log(`redact mode: ${redactMode}`, 'info');
+    log({ request_paths: requestPaths, response_paths: responsePaths }, 'debug');
 
-    // 1) Get request body (always, since we need it to recreate the request)
-    const { bodyText: reqBodyText } = getRequestBody(r, log);
+    const { bodyText } = getRequestBody(r, log);
+    reqBodyText = bodyText;
 
-    // 2) If enabled, **immediately** scan ONLY the request extract
-    if (isOn(inspectMode, 'request')) {
-      const requestExtract = extractFromJSON(reqBodyText, REQUEST_PATHS, log, 'request');
-      const requestPayload = buildSidebandPayload(requestExtract); // no extra labels/text
-      const { status: sbStatusReq, text: sbTextReq } =
-        await callSideband(log, SIDEBAND_URL, SIDEBAND_BEARER, SIDEBAND_UA, requestPayload);
+    const requestInspection = await runInspectionPhase({
+      phase: 'request',
+      bodyText: reqBodyText,
+      paths: requestPaths,
+      inspectEnabled: inspectRequestEnabled,
+      redactEnabled: redactRequestEnabled,
+      log,
+      sideband
+    });
 
-      const { outcome: outcomeReq } = parseSidebandOutcome(sbStatusReq, sbTextReq);
-      log(`sideband (request) outcome=${String(outcomeReq)} status=${sbStatusReq}`, 'info');
-
-      if (shouldBlock(outcomeReq)) {
-        const details = {
-          sideband_status: sbStatusReq,
-          sideband_preview: (sbTextReq || '').substring(0, 512)
-        };
-        return blockAndReturn(r, log, outcomeReq || 'unknown', details);
-      }
+    if (requestInspection.status === 'blocked') {
+      return blockAndReturn(r, log, requestInspection.outcome, requestInspection.details);
+    }
+    if (requestInspection.bodyText !== undefined) {
+      reqBodyText = requestInspection.bodyText;
     }
 
-    // 3) Send to backend as a subrequest (recreate original request)
     const backend = await fetchBackend(r, log, reqBodyText);
-    const respBodyText = (typeof backend.body === 'string')
+    let respBodyText = (typeof backend.body === 'string')
       ? backend.body
       : (backend.body ? String(backend.body) : '');
+    backend.body = respBodyText;
 
-    // 4) If enabled, scan ONLY the response extract (no request included)
-    if (isOn(inspectMode, 'response')) {
-      const responseExtract = extractFromJSON(respBodyText, RESPONSE_PATHS, log, 'response');
-      const responsePayload = buildSidebandPayload(responseExtract); // no extra labels/text
-      const { status: sbStatusResp, text: sbTextResp } =
-        await callSideband(log, SIDEBAND_URL, SIDEBAND_BEARER, SIDEBAND_UA, responsePayload);
+    const responseInspection = await runInspectionPhase({
+      phase: 'response',
+      bodyText: respBodyText,
+      paths: responsePaths,
+      inspectEnabled: inspectResponseEnabled,
+      redactEnabled: redactResponseEnabled,
+      log,
+      sideband
+    });
 
-      const { outcome: outcomeResp } = parseSidebandOutcome(sbStatusResp, sbTextResp);
-      log(`sideband (response) outcome=${String(outcomeResp)} status=${sbStatusResp}`, 'info');
-
-      if (shouldBlock(outcomeResp)) {
-        const details = {
-          sideband_status: sbStatusResp,
-          sideband_preview: (sbTextResp || '').substring(0, 512)
-        };
-        return blockAndReturn(r, log, outcomeResp || 'unknown', details);
-      }
+    if (responseInspection.status === 'blocked') {
+      return blockAndReturn(r, log, responseInspection.outcome, responseInspection.details);
+    }
+    if (responseInspection.bodyText !== undefined) {
+      respBodyText = responseInspection.bodyText;
+      backend.body = respBodyText;
     }
 
-    // 5) Cleared (or inspection off): relay backend response
     return sendBackendToClient(r, backend, log);
 
   } catch (e) {
@@ -237,9 +307,9 @@ async function handle(r) {
     // return blockAndReturn(r, makeLogger({log: 'err', r}), 'error', { reason: 'exception in sideband handler' });
   }
 
-  // Fallback: try to proxy anyway
   try {
-    const fallback = await fetchBackend(r, log, (r.requestText || ''));
+    const fallbackBody = reqBodyText || r.requestText || '';
+    const fallback = await fetchBackend(r, log, fallbackBody);
     return sendBackendToClient(r, fallback, log);
   } catch (_) {
     r.return(502, 'Upstream error');
