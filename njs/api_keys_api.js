@@ -3,6 +3,146 @@ export default { handle };
 import { makeLogger, safeJson } from './utils.js';
 import { readApiKeys, writeApiKeys, findApiKeyByName } from './config_store.js';
 
+const DEFAULT_BLOCK_MESSAGE = 'F5 AI Guardrails blocked this request';
+
+function defaultBlockingResponse() {
+  return {
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    body: JSON.stringify({
+      message: {
+        role: 'assistant',
+        content: DEFAULT_BLOCK_MESSAGE
+      }
+    })
+  };
+}
+
+function sanitizeExistingBlockingResponse(value) {
+  const defaults = defaultBlockingResponse();
+  if (!value || typeof value !== 'object') {
+    return defaults;
+  }
+
+  const result = {
+    status: defaults.status,
+    contentType: defaults.contentType,
+    body: defaults.body
+  };
+
+  if (value.status !== undefined) {
+    const num = Number(value.status);
+    if (Number.isFinite(num)) {
+      const status = Math.trunc(num);
+      if (status >= 100 && status <= 999) {
+        result.status = status;
+      }
+    }
+  }
+
+  if (value.contentType !== undefined) {
+    const ct = String(value.contentType).trim();
+    if (ct) {
+      result.contentType = ct;
+    }
+  }
+
+  if (value.body !== undefined) {
+    if (typeof value.body === 'string') {
+      result.body = value.body;
+    } else if (value.body && typeof value.body === 'object') {
+      try {
+        result.body = JSON.stringify(value.body);
+      } catch (_) {
+        /* ignore and keep default */
+      }
+    }
+  }
+
+  return result;
+}
+
+function normalizeBlockingResponse(value, fallback) {
+  const base = sanitizeExistingBlockingResponse(fallback);
+
+  if (value === undefined) {
+    return { ok: true, value: base };
+  }
+
+  if (!value || typeof value !== 'object') {
+    return {
+      ok: false,
+      error: { code: 'invalid_blocking_response', message: 'blockingResponse must be an object.' }
+    };
+  }
+
+  const result = {
+    status: base.status,
+    contentType: base.contentType,
+    body: base.body
+  };
+
+  if (value.status !== undefined) {
+    const num = Number(value.status);
+    if (!Number.isFinite(num)) {
+      return {
+        ok: false,
+        error: { code: 'invalid_block_status', message: 'blockingResponse.status must be a number.' }
+      };
+    }
+    const status = Math.trunc(num);
+    if (status < 100 || status > 999) {
+      return {
+        ok: false,
+        error: { code: 'invalid_block_status', message: 'blockingResponse.status must be between 100 and 999.' }
+      };
+    }
+    result.status = status;
+  }
+
+  if (value.contentType !== undefined) {
+    const ct = String(value.contentType).trim();
+    if (!ct) {
+      return {
+        ok: false,
+        error: { code: 'invalid_block_content_type', message: 'blockingResponse.contentType cannot be empty.' }
+      };
+    }
+    result.contentType = ct;
+  }
+
+  if (value.body !== undefined) {
+    if (value.body === null) {
+      result.body = '';
+    } else if (typeof value.body === 'string') {
+      result.body = value.body;
+    } else if (typeof value.body === 'object') {
+      try {
+        result.body = JSON.stringify(value.body);
+      } catch (err) {
+        return {
+          ok: false,
+          error: { code: 'invalid_block_body', message: 'blockingResponse.body must be serializable to JSON.' }
+        };
+      }
+    } else {
+      return {
+        ok: false,
+        error: { code: 'invalid_block_body', message: 'blockingResponse.body must be a string or object.' }
+      };
+    }
+  }
+
+  return { ok: true, value: result };
+}
+
+function ensureBlockingResponse(record) {
+  if (!record || typeof record !== 'object') return record;
+  const normalized = normalizeBlockingResponse(record.blockingResponse, record.blockingResponse);
+  record.blockingResponse = normalized.ok ? normalized.value : defaultBlockingResponse();
+  return record;
+}
+
 function respondJson(r, status, payload) {
   r.headersOut['content-type'] = 'application/json; charset=utf-8';
   r.headersOut['cache-control'] = 'no-store';
@@ -51,8 +191,11 @@ function nowIso() {
 
 async function handleGet(r, log) {
   const items = readApiKeys(r);
-  log({ step: 'api_keys:get', count: items.length }, 'debug');
-  respondJson(r, 200, { items });
+  const normalized = Array.isArray(items)
+    ? items.map(item => ensureBlockingResponse({ ...item }))
+    : [];
+  log({ step: 'api_keys:get', count: normalized.length }, 'debug');
+  respondJson(r, 200, { items: normalized });
 }
 
 async function handlePost(r, log) {
@@ -76,6 +219,12 @@ async function handlePost(r, log) {
     return;
   }
 
+  const blockResult = normalizeBlockingResponse(payload.blockingResponse, undefined);
+  if (!blockResult.ok) {
+    respondJson(r, 400, { error: blockResult.error.code, message: blockResult.error.message });
+    return;
+  }
+
   const records = readApiKeys(r);
   if (findApiKeyByName(records, name)) {
     respondJson(r, 409, { error: 'name_conflict', message: 'Name already exists.' });
@@ -89,6 +238,10 @@ async function handlePost(r, log) {
     created_at: nowIso(),
     updated_at: nowIso()
   };
+
+  record.blockingResponse = blockResult.value;
+
+  ensureBlockingResponse(record);
 
   records.push(record);
 
@@ -131,6 +284,7 @@ async function handlePatch(r, log) {
   }
 
   const record = { ...records[targetIndex] };
+  ensureBlockingResponse(record);
   let changed = false;
 
   if (payload.name !== undefined) {
@@ -156,6 +310,18 @@ async function handlePatch(r, log) {
     record.key = key;
     changed = true;
   }
+
+  if (payload.blockingResponse !== undefined) {
+    const blockResult = normalizeBlockingResponse(payload.blockingResponse, record.blockingResponse);
+    if (!blockResult.ok) {
+      respondJson(r, 400, { error: blockResult.error.code, message: blockResult.error.message });
+      return;
+    }
+    record.blockingResponse = blockResult.value;
+    changed = true;
+  }
+
+  ensureBlockingResponse(record);
 
   if (!changed) {
     respondJson(r, 200, { item: record, changed: false });

@@ -1332,6 +1332,122 @@
 
       const MAX_SELECTORS = 12;
 
+      const DEFAULT_BLOCK_BODY_TEMPLATE = {
+        message: {
+          role: 'assistant',
+          content: 'F5 AI Guardrails blocked this request'
+        }
+      };
+
+      const DEFAULT_BLOCKING_RESPONSE_SHAPE = Object.freeze({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify(DEFAULT_BLOCK_BODY_TEMPLATE, null, 2)
+      });
+
+      function prettyPrintBlockingBody(value) {
+        if (typeof value !== 'string') return '';
+        const trimmed = value.trim();
+        if (!trimmed) return '';
+        try {
+          const parsed = JSON.parse(trimmed);
+          return JSON.stringify(parsed, null, 2);
+        } catch (_) {
+          return value;
+        }
+      }
+
+      function normalizeBlockingResponseConfig(value) {
+        const base = DEFAULT_BLOCKING_RESPONSE_SHAPE;
+        let source = value;
+        let fromDefault = false;
+
+        if (!source || typeof source !== 'object') {
+          source = {};
+          fromDefault = true;
+        } else if (source.__fromDefault === true) {
+          fromDefault = true;
+        }
+
+        const result = {
+          status: base.status,
+          contentType: base.contentType,
+          body: base.body
+        };
+
+        if (source.status !== undefined) {
+          const num = Number(source.status);
+          if (Number.isFinite(num) && num >= 100 && num <= 999) {
+            result.status = Math.trunc(num);
+          }
+        }
+
+        if (source.contentType !== undefined) {
+          const ct = String(source.contentType).trim();
+          if (ct) {
+            result.contentType = ct;
+          }
+        }
+
+        if (source.body !== undefined) {
+          if (typeof source.body === 'string') {
+            const pretty = prettyPrintBlockingBody(source.body);
+            result.body = pretty === '' ? '' : pretty;
+          } else if (source.body && typeof source.body === 'object') {
+            try {
+              result.body = JSON.stringify(source.body, null, 2);
+            } catch (_) {
+              result.body = base.body;
+            }
+          } else {
+            result.body = '';
+          }
+        }
+
+        result.__fromDefault = fromDefault;
+        return result;
+      }
+
+      function summarizeBlockingResponseBody(response) {
+        if (!response || typeof response !== 'object') return '—';
+        const { body } = response;
+        if (!body) return '—';
+        if (typeof body !== 'string') {
+          try {
+            return JSON.stringify(body);
+          } catch (_) {
+            return '—';
+          }
+        }
+        try {
+          const parsed = JSON.parse(body);
+          const message = parsed && parsed.message;
+          if (message && typeof message.content === 'string') {
+            return message.content.length > 80 ? `${message.content.slice(0, 80)}…` : message.content;
+          }
+        } catch (_) {
+          // ignore parse failure
+        }
+        const trimmed = body.trim();
+        if (!trimmed) return '—';
+        return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+      }
+
+      function createEmptyEditorForm() {
+        return {
+          name: '',
+          key: '',
+          blockStatus: String(DEFAULT_BLOCKING_RESPONSE_SHAPE.status),
+          blockContentType: DEFAULT_BLOCKING_RESPONSE_SHAPE.contentType,
+          blockBody: DEFAULT_BLOCKING_RESPONSE_SHAPE.body
+        };
+      }
+
+      function blockingResponsesEqual(a, b) {
+        if (!a || !b) return false;
+        return a.status === b.status && a.contentType === b.contentType && a.body === b.body;
+      }
+
       const ApiKeysApp = () => {
         const [keys, setKeys] = useState([]);
         const [status, setStatus] = useState({ tone: 'loading', message: 'Loading API keys…' });
@@ -1339,7 +1455,7 @@
         const [editorOpen, setEditorOpen] = useState(false);
         const [editorMode, setEditorMode] = useState('create');
         const [editingRecord, setEditingRecord] = useState(null);
-        const [editorForm, setEditorForm] = useState({ name: '', key: '' });
+        const [editorForm, setEditorForm] = useState(() => createEmptyEditorForm());
         const [editorSubmitting, setEditorSubmitting] = useState(false);
 
         const pushToast = (tone, message) => {
@@ -1365,8 +1481,12 @@
             }
             const payload = await response.json();
             const items = Array.isArray(payload.items) ? payload.items : [];
-            setKeys(items);
-            setStatus({ tone: 'success', message: `Loaded ${items.length} API key${items.length === 1 ? '' : 's'}.` });
+            const normalized = items.map(item => ({
+              ...item,
+              blockingResponse: normalizeBlockingResponseConfig(item.blockingResponse)
+            }));
+            setKeys(normalized);
+            setStatus({ tone: 'success', message: `Loaded ${normalized.length} API key${normalized.length === 1 ? '' : 's'}.` });
           } catch (error) {
             const message = `Unable to load API keys: ${error.message}`;
             setStatus({ tone: 'error', message });
@@ -1386,7 +1506,7 @@
         };
 
         const resetEditor = () => {
-          setEditorForm({ name: '', key: '' });
+          setEditorForm(createEmptyEditorForm());
           setEditingRecord(null);
           setEditorMode('create');
         };
@@ -1399,21 +1519,50 @@
         const openCreate = () => {
           setEditorMode('create');
           setEditingRecord(null);
-          setEditorForm({ name: '', key: '' });
+          setEditorForm(createEmptyEditorForm());
           setEditorOpen(true);
         };
 
         const openEdit = record => {
           if (!record) return;
+          const normalizedBlock = normalizeBlockingResponseConfig(record.blockingResponse);
           setEditorMode('edit');
           setEditingRecord(record);
-          setEditorForm({ name: record.name || '', key: '' });
+          setEditorForm({
+            name: record.name || '',
+            key: '',
+            blockStatus: String(normalizedBlock.status),
+            blockContentType: normalizedBlock.contentType,
+            blockBody: normalizedBlock.body
+          });
           setEditorOpen(true);
         };
 
         const handleEditorChange = event => {
           const { name, value } = event.target;
           setEditorForm(prev => ({ ...prev, [name]: value }));
+        };
+
+        const buildBlockingPayload = () => {
+          const statusNumber = Number(editorForm.blockStatus);
+          if (!Number.isFinite(statusNumber)) {
+            pushToast('info', 'Blocking status must be a number between 100 and 999.');
+            return null;
+          }
+          const statusCode = Math.trunc(statusNumber);
+          if (statusCode < 100 || statusCode > 999) {
+            pushToast('info', 'Blocking status must be between 100 and 999.');
+            return null;
+          }
+          const contentType = (editorForm.blockContentType || '').trim();
+          if (!contentType) {
+            pushToast('info', 'Blocking response content type cannot be empty.');
+            return null;
+          }
+          const body = editorForm.blockBody === undefined || editorForm.blockBody === null
+            ? ''
+            : String(editorForm.blockBody);
+          return { status: statusCode, contentType, body };
         };
 
         const handleEditorSubmit = async event => {
@@ -1431,13 +1580,18 @@
             return;
           }
 
+          const blockingPayload = buildBlockingPayload();
+          if (!blockingPayload) {
+            return;
+          }
+
           setEditorSubmitting(true);
           try {
             if (editorMode === 'create') {
               const response = await fetch('/config/api/keys', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                body: JSON.stringify({ name, key })
+                body: JSON.stringify({ name, key, blockingResponse: blockingPayload })
               });
               if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
@@ -1448,14 +1602,22 @@
               await loadKeys();
             } else if (editingRecord && editingRecord.id) {
               const payload = { id: editingRecord.id };
+              let changed = false;
               if (name !== editingRecord.name) {
                 payload.name = name;
+                changed = true;
               }
               if (key) {
                 payload.key = key;
+                changed = true;
               }
-              if (!payload.name && !payload.key) {
-                pushToast('info', 'Update the name or provide a new key before saving.');
+              const existingBlocking = editingRecord.blockingResponse || normalizeBlockingResponseConfig(null);
+              if (!blockingResponsesEqual(blockingPayload, existingBlocking) || existingBlocking.__fromDefault === true) {
+                payload.blockingResponse = blockingPayload;
+                changed = true;
+              }
+              if (!changed) {
+                pushToast('info', 'Update at least one field before saving.');
                 return;
               }
               const response = await fetch('/config/api/keys', {
@@ -1541,6 +1703,7 @@
                       <tr>
                         <th className="px-4 py-3 text-left font-semibold">Name</th>
                         <th className="px-4 py-3 text-left font-semibold">Key Preview</th>
+                        <th className="px-4 py-3 text-left font-semibold">Blocking Response</th>
                         <th className="px-4 py-3 text-left font-semibold">Updated</th>
                         <th className="px-4 py-3 text-right font-semibold">Actions</th>
                       </tr>
@@ -1550,6 +1713,16 @@
                         <tr key={record.id}>
                           <td className="px-4 py-3 font-medium text-slate-800">{record.name}</td>
                           <td className="px-4 py-3 font-mono text-xs text-slate-600">{keyPreview(record.key)}</td>
+                          <td className="px-4 py-3 text-slate-500">
+                            <div className="flex items-center gap-2 text-xs text-slate-600">
+                              <span className="font-semibold text-slate-700">{(record.blockingResponse && record.blockingResponse.status) || DEFAULT_BLOCKING_RESPONSE_SHAPE.status}</span>
+                              <span className="text-slate-400">•</span>
+                              <span>{(record.blockingResponse && record.blockingResponse.contentType) || DEFAULT_BLOCKING_RESPONSE_SHAPE.contentType}</span>
+                            </div>
+                            <div className="mt-1 truncate text-xs text-slate-500">
+                              {summarizeBlockingResponseBody(record.blockingResponse)}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-slate-500">{record.updated_at ? new Date(record.updated_at).toLocaleString() : '—'}</td>
                           <td className="flex justify-end gap-2 px-4 py-3 text-right">
                             <button
@@ -1580,8 +1753,8 @@
               title={editorMode === 'create' ? 'New API Key' : `Edit ${editingRecord ? editingRecord.name : 'API Key'}`}
               description={
                 editorMode === 'create'
-                  ? 'Provide a display name and bearer token to store in the key-value store.'
-                  : 'Update the display name or rotate the stored key value.'
+                  ? 'Provide a display name, bearer token, and customize the blocking response stored in the key-value store.'
+                  : 'Update the display name, rotate the stored key value, or adjust the blocking response.'
               }
               onClose={() => {
                 if (!editorSubmitting) {
@@ -1625,6 +1798,58 @@
                       ? 'Values persist to the NGINX key-value store. Rotate credentials when upstream keys change.'
                       : 'Leaving this field blank keeps the currently stored token.'}
                   </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-slate-700" htmlFor="block-status">
+                      Blocking Status Code
+                    </label>
+                    <input
+                      id="block-status"
+                      name="blockStatus"
+                      type="number"
+                      min="100"
+                      max="999"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:ring-primary"
+                      value={editorForm.blockStatus}
+                      onChange={handleEditorChange}
+                      placeholder="200"
+                      disabled={editorSubmitting}
+                    />
+                    <p className="text-xs text-slate-500">Set the HTTP status returned when this key blocks a request.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-slate-700" htmlFor="block-content-type">
+                      Blocking Content-Type
+                    </label>
+                    <input
+                      id="block-content-type"
+                      name="blockContentType"
+                      type="text"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:ring-primary"
+                      value={editorForm.blockContentType}
+                      onChange={handleEditorChange}
+                      placeholder="application/json; charset=utf-8"
+                      disabled={editorSubmitting}
+                    />
+                    <p className="text-xs text-slate-500">Customize the Content-Type header attached to blocking responses.</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-slate-700" htmlFor="block-body">
+                    Blocking Response Body
+                  </label>
+                  <textarea
+                    id="block-body"
+                    name="blockBody"
+                    rows="6"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-primary focus:ring-primary"
+                    value={editorForm.blockBody || ''}
+                    onChange={handleEditorChange}
+                    placeholder='{"message":{"role":"assistant","content":"F5 AI Guardrails blocked this request"}}'
+                    disabled={editorSubmitting}
+                  ></textarea>
+                  <p className="text-xs text-slate-500">Provide the exact payload returned when a request is blocked. JSON is recommended.</p>
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
                   <button

@@ -165,22 +165,102 @@ function logPatternResult(log, phase, result) {
 
 /* --------------------------- Response helpers ----------------------------- */
 
-function buildBlockedBody() {
+const DEFAULT_BLOCK_MESSAGE = 'F5 AI Guardrails blocked this request';
+
+function defaultBlockingResponse() {
   return {
-    message: {
-      role: 'assistant',
-      content: 'F5 AI Guardrails blocked this request'
-    }
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    body: JSON.stringify({
+      message: {
+        role: 'assistant',
+        content: DEFAULT_BLOCK_MESSAGE
+      }
+    })
   };
 }
 
-function blockAndReturn(r, log, outcome, extra) {
-  const bodyObj = buildBlockedBody();
-  const body = JSON.stringify(bodyObj);
+function sanitizeBlockingResponse(value) {
+  const defaults = defaultBlockingResponse();
+  if (!value || typeof value !== 'object') {
+    return defaults;
+  }
 
-  r.headersOut['content-type'] = 'application/json; charset=utf-8';
-  log({ step: 'block', outcome, extraPreview: extra ? String(extra).slice(0, 200) : undefined }, 'info');
-  r.return(200, body);
+  const response = {
+    status: defaults.status,
+    contentType: defaults.contentType,
+    body: defaults.body
+  };
+
+  if (value.status !== undefined) {
+    const num = Number(value.status);
+    if (Number.isFinite(num)) {
+      const status = Math.trunc(num);
+      if (status >= 100 && status <= 999) {
+        response.status = status;
+      }
+    }
+  }
+
+  if (value.contentType !== undefined) {
+    const ct = String(value.contentType).trim();
+    if (ct) {
+      response.contentType = ct;
+    }
+  }
+
+  if (value.body !== undefined) {
+    if (typeof value.body === 'string') {
+      response.body = value.body;
+    } else if (value.body && typeof value.body === 'object') {
+      try {
+        response.body = JSON.stringify(value.body);
+      } catch (_) {
+        /* keep default */
+      }
+    }
+  }
+
+  return response;
+}
+
+function resolveBlockingResponse(apiKeys, apiKeyName) {
+  if (!apiKeyName) {
+    return defaultBlockingResponse();
+  }
+  const record = findApiKeyByName(Array.isArray(apiKeys) ? apiKeys : [], apiKeyName);
+  if (!record) {
+    return defaultBlockingResponse();
+  }
+  return sanitizeBlockingResponse(record.blockingResponse);
+}
+
+function blockAndReturn(r, log, opts) {
+  const outcome = opts && opts.outcome ? opts.outcome : 'blocked';
+  const extra = opts && opts.extra ? opts.extra : undefined;
+  const apiKeys = opts && opts.apiKeys ? opts.apiKeys : [];
+  const providedName = opts && opts.apiKeyName ? opts.apiKeyName : undefined;
+  const fallbackName = extra && typeof extra === 'object' ? extra.api_key_name : undefined;
+  const apiKeyName = providedName || fallbackName;
+  const blockingResponse = resolveBlockingResponse(apiKeys, apiKeyName);
+  const extraPreview = extra && typeof extra === 'object'
+    ? safeJson(extra).slice(0, 200)
+    : (extra !== undefined ? String(extra).slice(0, 200) : undefined);
+
+  if (blockingResponse.contentType) {
+    r.headersOut['content-type'] = blockingResponse.contentType;
+  }
+
+  log({
+    step: 'block',
+    outcome,
+    api_key_name: apiKeyName || null,
+    pattern_id: opts && opts.patternId ? opts.patternId : null,
+    phase: opts && opts.phase ? opts.phase : null,
+    extra_preview: extraPreview
+  }, 'info');
+
+  r.return(blockingResponse.status, blockingResponse.body);
 }
 
 /* --------------------------- Pipeline helpers ----------------------------- */
@@ -510,7 +590,13 @@ async function handle(r) {
       const executed = results.filter((res) => res.status !== 'skipped' && res.status !== 'skipped_no_match');
       const blocked = executed.find((res) => res.status === 'blocked');
       if (blocked) {
-        return { status: 'blocked', outcome: blocked.outcome, details: blocked.details };
+        return {
+          status: 'blocked',
+          outcome: blocked.outcome,
+          details: blocked.details,
+          apiKeyName: blocked.apiKeyName,
+          patternId: blocked.patternId
+        };
       }
 
       if (executed.length === 0) {
@@ -526,7 +612,13 @@ async function handle(r) {
           apiKeys
         });
         if (fallbackResult.status === 'blocked') {
-          return { status: 'blocked', outcome: fallbackResult.outcome, details: fallbackResult.details };
+          return {
+            status: 'blocked',
+            outcome: fallbackResult.outcome,
+            details: fallbackResult.details,
+            apiKeyName: fallbackResult.apiKeyName,
+            patternId: fallbackResult.patternId
+          };
         }
         return {
           status: fallbackResult.status,
@@ -558,7 +650,13 @@ async function handle(r) {
       });
 
       if (result.status === 'blocked') {
-        return { status: 'blocked', outcome: result.outcome, details: result.details };
+        return {
+          status: 'blocked',
+          outcome: result.outcome,
+          details: result.details,
+          apiKeyName: result.apiKeyName,
+          patternId: result.patternId
+        };
       }
       if (result.bodyText !== undefined) {
         currentBody = result.bodyText;
@@ -581,7 +679,13 @@ async function handle(r) {
     });
 
     if (fallbackResult.status === 'blocked') {
-      return { status: 'blocked', outcome: fallbackResult.outcome, details: fallbackResult.details };
+      return {
+        status: 'blocked',
+        outcome: fallbackResult.outcome,
+        details: fallbackResult.details,
+        apiKeyName: fallbackResult.apiKeyName,
+        patternId: fallbackResult.patternId
+      };
     }
     if (fallbackResult.bodyText !== undefined) {
       currentBody = fallbackResult.bodyText;
@@ -646,7 +750,14 @@ async function handle(r) {
 
     if (requestResult.status === 'blocked') {
       if (backendPromise) backendPromise.catch(() => {});
-      return blockAndReturn(r, log, requestResult.outcome || 'blocked', requestResult.details || {});
+      return blockAndReturn(r, log, {
+        outcome: requestResult.outcome || 'blocked',
+        extra: requestResult.details || {},
+        apiKeys,
+        apiKeyName: requestResult.apiKeyName,
+        patternId: requestResult.patternId,
+        phase: 'request'
+      });
     }
 
     if (requestResult.body !== undefined && requestResult.body !== reqBodyText) {
@@ -677,7 +788,14 @@ async function handle(r) {
     });
 
     if (responseResult.status === 'blocked') {
-      return blockAndReturn(r, log, responseResult.outcome || 'blocked', responseResult.details || {});
+      return blockAndReturn(r, log, {
+        outcome: responseResult.outcome || 'blocked',
+        extra: responseResult.details || {},
+        apiKeys,
+        apiKeyName: responseResult.apiKeyName,
+        patternId: responseResult.patternId,
+        phase: 'response'
+      });
     }
     if (responseResult.body !== undefined) {
       respBodyText = responseResult.body;
@@ -702,7 +820,7 @@ async function handle(r) {
   } catch (e) {
     ngx.log(ngx.ERR, `sideband error: ${e && e.message ? e.message : e}`);
     // Fail OPEN by default; to fail CLOSED, uncomment:
-    // return blockAndReturn(r, makeLogger({log: 'err', r}), 'error', { reason: 'exception in sideband handler' });
+    // return blockAndReturn(r, makeLogger({ log: 'err', r }), { outcome: 'error', extra: { reason: 'exception in sideband handler' } });
   }
 
   try {
