@@ -32,6 +32,104 @@ export function isModeEnabled(mode, target) {
   return normalized === target;
 }
 
+export const CONFIG_HOST_DEFAULT = '__default__';
+
+export function normalizeHostName(value) {
+  const trimmed = value === undefined || value === null ? '' : String(value).trim();
+  if (!trimmed) return CONFIG_HOST_DEFAULT;
+  return trimmed.toLowerCase();
+}
+
+function readHostsArray(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map(item => String(item));
+  }
+  const parsed = safeJsonParse(raw);
+  if (Array.isArray(parsed)) {
+    return parsed.map(item => String(item));
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    return raw.split(/\s*,\s*/).map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function writeHostsVariable(r, hosts) {
+  const seen = {};
+  const normalized = [];
+  for (let i = 0; i < hosts.length; i++) {
+    const host = normalizeHostName(hosts[i]);
+    if (!host || seen[host]) continue;
+    seen[host] = true;
+    normalized.push(host);
+  }
+  if (!seen[CONFIG_HOST_DEFAULT]) {
+    normalized.unshift(CONFIG_HOST_DEFAULT);
+  }
+  try {
+    r.variables.scan_config_hosts = JSON.stringify(normalized);
+    return undefined;
+  } catch (err) {
+    return String(err);
+  }
+}
+
+export function readConfigHosts(r) {
+  const raw = readVar(r, 'scan_config_hosts', '[]');
+  const items = readHostsArray(raw);
+  const seen = {};
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    const host = normalizeHostName(items[i]);
+    if (!host || seen[host]) continue;
+    seen[host] = true;
+    out.push(host);
+  }
+  if (!seen[CONFIG_HOST_DEFAULT]) {
+    out.unshift(CONFIG_HOST_DEFAULT);
+  }
+  return out;
+}
+
+export function ensureHostInConfig(r, host) {
+  const target = normalizeHostName(host);
+  const hosts = readConfigHosts(r);
+  if (hosts.indexOf(target) !== -1) {
+    return { added: false, hosts };
+  }
+  hosts.push(target);
+  const error = writeHostsVariable(r, hosts);
+  if (error) {
+    return { added: false, error };
+  }
+  return { added: true, hosts };
+}
+
+export function removeHostFromConfig(r, host) {
+  const target = normalizeHostName(host);
+  if (target === CONFIG_HOST_DEFAULT) {
+    return { removed: false, hosts: readConfigHosts(r) };
+  }
+  const current = readConfigHosts(r);
+  const filtered = [];
+  const seen = {};
+  for (let i = 0; i < current.length; i++) {
+    const normalized = normalizeHostName(current[i]);
+    if (!normalized || normalized === target) continue;
+    if (seen[normalized]) continue;
+    seen[normalized] = true;
+    filtered.push(normalized);
+  }
+  if (!filtered.length) {
+    filtered.push(CONFIG_HOST_DEFAULT);
+  }
+  const error = writeHostsVariable(r, filtered);
+  if (error) {
+    return { removed: false, error };
+  }
+  return { removed: true, hosts: filtered };
+}
+
 // --- Lightweight, njs-friendly logger
 // opts: { log: boolean | 'debug'|'info'|'warn'|'err', r?: <request> }
 export function makeLogger(opts) {
@@ -215,7 +313,12 @@ export const SCAN_CONFIG_DEFAULTS = {
   logLevel: 'info',
   requestPaths: ['.messages[-1].content'],
   responsePaths: ['.message.content'],
-  requestForwardMode: 'sequential'
+  requestForwardMode: 'sequential',
+  requestExtractor: '',
+  responseExtractor: '',
+  requestExtractors: [],
+  responseExtractors: [],
+  extractorParallel: false
 };
 
 export const SCAN_CONFIG_ENUMS = {
@@ -282,37 +385,200 @@ function parsePathsVariable(text, fallback) {
   }
 }
 
+function parseExtractorList(raw, fallback) {
+  if (raw === undefined || raw === null || raw === '') {
+    return Array.isArray(fallback) ? fallback.slice() : [];
+  }
+  let parsed;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return Array.isArray(fallback) ? fallback.slice() : [];
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (_) {
+      return [trimmed];
+    }
+  } else {
+    parsed = raw;
+  }
+
+  if (Array.isArray(parsed)) {
+    const out = [];
+    for (let i = 0; i < parsed.length; i++) {
+      const item = parsed[i];
+      if (item === undefined || item === null) continue;
+      const str = String(item).trim();
+      if (str) out.push(str);
+    }
+    return out;
+  }
+
+  if (typeof parsed === 'string') {
+    const str = parsed.trim();
+    return str ? [str] : Array.isArray(fallback) ? fallback.slice() : [];
+  }
+
+  return Array.isArray(fallback) ? fallback.slice() : [];
+}
+
+function normalizeBooleanFlag(value, fallback) {
+  if (value === undefined || value === null) return !!fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') return false;
+  return !!fallback;
+}
+
+function normalizeExtractorInput(input, fallback) {
+  if (input === undefined || input === null) {
+    return { values: Array.isArray(fallback) ? fallback.slice() : [], error: null };
+  }
+  if (Array.isArray(input)) {
+    const out = [];
+    for (let i = 0; i < input.length; i++) {
+      const item = input[i];
+      if (item === undefined || item === null) continue;
+      const str = String(item).trim();
+      if (!str) continue;
+      if (out.indexOf(str) === -1) out.push(str);
+    }
+    return { values: out, error: null };
+  }
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return { values: [], error: null };
+    if (trimmed[0] === '[') {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return normalizeExtractorInput(parsed, fallback);
+      } catch (_) {
+        return { values: [trimmed], error: null };
+      }
+    }
+    if (trimmed.indexOf(',') !== -1) {
+      return normalizeExtractorInput(trimmed.split(','), fallback);
+    }
+    return { values: [trimmed], error: null };
+  }
+  return { values: [], error: 'extractor identifiers must be strings' };
+}
+
+function coerceOptionalBoolean(value, fieldName) {
+  if (value === undefined || value === null) {
+    return { value: undefined, error: null };
+  }
+  if (typeof value === 'boolean') {
+    return { value, error: null };
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes') {
+    return { value: true, error: null };
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') {
+    return { value: false, error: null };
+  }
+  return { value: undefined, error: (fieldName || 'value') + ' must be a boolean-like string or boolean.' };
+}
+
 export function readScanConfig(r) {
+  const inspectDefault = normalizeEnum(
+    readVariable(r, 'scan_config_default_inspect_mode'),
+    SCAN_CONFIG_ENUMS.inspectMode,
+    SCAN_CONFIG_DEFAULTS.inspectMode
+  );
+  const redactDefault = normalizeEnum(
+    readVariable(r, 'scan_config_default_redact_mode'),
+    SCAN_CONFIG_ENUMS.redactMode,
+    SCAN_CONFIG_DEFAULTS.redactMode,
+    { on: 'both', true: 'both' }
+  );
+  const logDefault = normalizeEnum(
+    readVariable(r, 'scan_config_default_log_level'),
+    SCAN_CONFIG_ENUMS.logLevel,
+    SCAN_CONFIG_DEFAULTS.logLevel
+  );
+  const requestPathsDefault = parsePathsVariable(
+    readVariable(r, 'scan_config_default_request_paths'),
+    SCAN_CONFIG_DEFAULTS.requestPaths
+  );
+  const responsePathsDefault = parsePathsVariable(
+    readVariable(r, 'scan_config_default_response_paths'),
+    SCAN_CONFIG_DEFAULTS.responsePaths
+  );
+  const forwardDefault = normalizeEnum(
+    readVariable(r, 'scan_config_default_request_forward_mode'),
+    SCAN_CONFIG_ENUMS.requestForwardMode,
+    SCAN_CONFIG_DEFAULTS.requestForwardMode
+  );
+  const requestExtractorDefaultList = parseExtractorList(
+    readVariable(r, 'scan_config_default_request_extractor'),
+    SCAN_CONFIG_DEFAULTS.requestExtractors.length
+      ? SCAN_CONFIG_DEFAULTS.requestExtractors
+      : (SCAN_CONFIG_DEFAULTS.requestExtractor ? [SCAN_CONFIG_DEFAULTS.requestExtractor] : [])
+  );
+  const responseExtractorDefaultList = parseExtractorList(
+    readVariable(r, 'scan_config_default_response_extractor'),
+    SCAN_CONFIG_DEFAULTS.responseExtractors.length
+      ? SCAN_CONFIG_DEFAULTS.responseExtractors
+      : (SCAN_CONFIG_DEFAULTS.responseExtractor ? [SCAN_CONFIG_DEFAULTS.responseExtractor] : [])
+  );
+  const extractorParallelDefault = normalizeBooleanFlag(
+    readVariable(r, 'scan_config_default_extractor_parallel'),
+    SCAN_CONFIG_DEFAULTS.extractorParallel
+  );
+
+  const requestExtractors = parseExtractorList(
+    readVariable(r, 'scan_config_request_extractor'),
+    requestExtractorDefaultList
+  );
+  const responseExtractors = parseExtractorList(
+    readVariable(r, 'scan_config_response_extractor'),
+    responseExtractorDefaultList
+  );
+  const extractorParallel = normalizeBooleanFlag(
+    (() => {
+      const raw = readVariable(r, 'scan_config_extractor_parallel');
+      return raw === undefined ? extractorParallelDefault : raw;
+    })(),
+    extractorParallelDefault
+  );
+
   return {
     inspectMode: normalizeEnum(
-      readVariable(r, 'scan_config_inspect_mode'),
+      readVariable(r, 'scan_config_inspect_mode', inspectDefault),
       SCAN_CONFIG_ENUMS.inspectMode,
-      SCAN_CONFIG_DEFAULTS.inspectMode
+      inspectDefault
     ),
     redactMode: normalizeEnum(
-      readVariable(r, 'scan_config_redact_mode'),
+      readVariable(r, 'scan_config_redact_mode', redactDefault),
       SCAN_CONFIG_ENUMS.redactMode,
-      SCAN_CONFIG_DEFAULTS.redactMode,
+      redactDefault,
       { on: 'both', true: 'both' }
     ),
     logLevel: normalizeEnum(
-      readVariable(r, 'scan_config_log_level'),
+      readVariable(r, 'scan_config_log_level', logDefault),
       SCAN_CONFIG_ENUMS.logLevel,
-      SCAN_CONFIG_DEFAULTS.logLevel
+      logDefault
     ),
     requestPaths: parsePathsVariable(
       readVariable(r, 'scan_config_request_paths'),
-      SCAN_CONFIG_DEFAULTS.requestPaths
+      requestPathsDefault
     ),
     responsePaths: parsePathsVariable(
       readVariable(r, 'scan_config_response_paths'),
-      SCAN_CONFIG_DEFAULTS.responsePaths
+      responsePathsDefault
     ),
     requestForwardMode: normalizeEnum(
-      readVariable(r, 'scan_config_request_forward_mode'),
+      readVariable(r, 'scan_config_request_forward_mode', forwardDefault),
       SCAN_CONFIG_ENUMS.requestForwardMode,
-      SCAN_CONFIG_DEFAULTS.requestForwardMode
-    )
+      forwardDefault
+    ),
+    requestExtractor: requestExtractors.length ? requestExtractors[0] : '',
+    responseExtractor: responseExtractors.length ? responseExtractors[0] : '',
+    requestExtractors,
+    responseExtractors,
+    extractorParallelEnabled: extractorParallel
   };
 }
 
@@ -395,12 +661,65 @@ export function validateConfigPatch(patch) {
     }
   }
 
+  const requestExtractorInput =
+    patch.requestExtractors !== undefined ? patch.requestExtractors
+    : (patch.requestExtractor !== undefined ? patch.requestExtractor : undefined);
+  if (requestExtractorInput !== undefined) {
+    const normalized = normalizeExtractorInput(requestExtractorInput, []);
+    if (normalized.error) {
+      errors.push('requestExtractors: ' + normalized.error);
+    } else {
+      updates.requestExtractors = normalized.values;
+    }
+  }
+
+  const responseExtractorInput =
+    patch.responseExtractors !== undefined ? patch.responseExtractors
+    : (patch.responseExtractor !== undefined ? patch.responseExtractor : undefined);
+  if (responseExtractorInput !== undefined) {
+    const normalized = normalizeExtractorInput(responseExtractorInput, []);
+    if (normalized.error) {
+      errors.push('responseExtractors: ' + normalized.error);
+    } else {
+      updates.responseExtractors = normalized.values;
+    }
+  }
+
+  const parallelInput =
+    patch.extractorParallelEnabled !== undefined ? patch.extractorParallelEnabled
+    : (patch.extractorParallel !== undefined ? patch.extractorParallel
+      : (patch.parallelExtractorsEnabled !== undefined ? patch.parallelExtractorsEnabled
+        : patch.parallelExtractors));
+  if (parallelInput !== undefined) {
+    const coerced = coerceOptionalBoolean(parallelInput, 'extractorParallelEnabled');
+    if (coerced.error) {
+      errors.push(coerced.error);
+    } else if (coerced.value !== undefined) {
+      updates.extractorParallel = coerced.value;
+    }
+  }
+
   return { errors, updates };
 }
 
-export function applyConfigPatch(r, updates) {
+export function applyConfigPatch(r, updates, host) {
   const applied = {};
   if (!updates || typeof updates !== 'object') return applied;
+
+  if (updates.requestExtractor !== undefined && updates.requestExtractors === undefined) {
+    updates.requestExtractors = updates.requestExtractor ? [updates.requestExtractor] : [];
+  }
+  if (updates.responseExtractor !== undefined && updates.responseExtractors === undefined) {
+    updates.responseExtractors = updates.responseExtractor ? [updates.responseExtractor] : [];
+  }
+
+  const targetHost = normalizeHostName(host);
+  applied.host = targetHost;
+
+  const ensure = ensureHostInConfig(r, targetHost);
+  if (ensure && ensure.error) {
+    applied.hostError = ensure.error;
+  }
 
   if (updates.inspectMode !== undefined) {
     try {
@@ -456,5 +775,63 @@ export function applyConfigPatch(r, updates) {
     }
   }
 
+  if (updates.requestExtractors !== undefined) {
+    try {
+      r.variables.scan_config_request_extractor = JSON.stringify(updates.requestExtractors);
+      applied.requestExtractors = updates.requestExtractors;
+      applied.requestExtractor = updates.requestExtractors.length ? updates.requestExtractors[0] : '';
+    } catch (err) {
+      applied.requestExtractorsError = String(err);
+    }
+  }
+
+  if (updates.responseExtractors !== undefined) {
+    try {
+      r.variables.scan_config_response_extractor = JSON.stringify(updates.responseExtractors);
+      applied.responseExtractors = updates.responseExtractors;
+      applied.responseExtractor = updates.responseExtractors.length ? updates.responseExtractors[0] : '';
+    } catch (err) {
+      applied.responseExtractorsError = String(err);
+    }
+  }
+
+  if (updates.extractorParallel !== undefined) {
+    try {
+      r.variables.scan_config_extractor_parallel = updates.extractorParallel ? '1' : '0';
+      applied.extractorParallel = !!updates.extractorParallel;
+    } catch (err) {
+      applied.extractorParallelError = String(err);
+    }
+  }
+
   return applied;
+}
+
+export function clearHostConfig(r, host) {
+  const targetHost = normalizeHostName(host);
+  const result = { host: targetHost };
+  const keys = [
+    'scan_config_inspect_mode',
+    'scan_config_redact_mode',
+    'scan_config_log_level',
+    'scan_config_request_paths',
+    'scan_config_response_paths',
+    'scan_config_request_forward_mode',
+    'scan_config_request_extractor',
+    'scan_config_response_extractor',
+    'scan_config_extractor_parallel'
+  ];
+  const errors = [];
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    try {
+      r.variables[key] = '';
+    } catch (err) {
+      errors.push(String(err));
+    }
+  }
+  if (errors.length) {
+    result.errors = errors;
+  }
+  return result;
 }
