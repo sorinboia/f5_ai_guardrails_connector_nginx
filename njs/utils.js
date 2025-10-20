@@ -294,19 +294,6 @@ export function extractSegments(root, searches, delimiter, opts) {
   return { text: out, segments };
 }
 
-/**
- * extractJoin
- * Extracts values from an object using JSON-path-like selectors and joins them.
- *   root:      object to search
- *   searches:  array like ['.a.b', '.arr[-1].x']
- *   delimiter: appended between extracted values
- *   opts:      { log: boolean | level, r: <request> }
- */
-export function extractJoin(root, searches, delimiter, opts) {
-  const { text } = extractSegments(root, searches, delimiter, opts);
-  return text;
-}
-
 export const SCAN_CONFIG_DEFAULTS = {
   inspectMode: 'both',
   redactMode: 'both',
