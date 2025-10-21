@@ -537,6 +537,8 @@ async function handle(r) {
   let redactResponseEnabled = isModeEnabled(redactMode, 'response');
   const extractorParallelEnabled = !!keyvalConfig.extractorParallelEnabled;
   const wantParallel = requestForwardMode === 'parallel';
+  const parallelRequestExtractors = extractorParallelEnabled && requestPatterns.length > 0;
+  const parallelResponseExtractors = extractorParallelEnabled && responsePatterns.length > 0;
   let parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled;
 
   const log = makeLogger({ log: varLevel, r });
@@ -555,18 +557,20 @@ async function handle(r) {
       fallbackPaths,
       patternsList,
       inspectEnabled,
-      redactEnabled
+      redactEnabled,
+      parallelExtractors
     } = opts;
 
     if (!inspectEnabled) {
       return { status: 'skipped', body };
     }
 
-    const effectiveRedact = extractorParallelEnabled ? false : !!redactEnabled;
+    const runParallel = parallelExtractors && patternsList.length > 0;
+    const effectiveRedact = runParallel ? false : !!redactEnabled;
     const pathsFallback = (fallbackPaths && fallbackPaths.length) ? fallbackPaths : (phase === 'request' ? REQUEST_PATHS_DEFAULT : RESPONSE_PATHS_DEFAULT);
     let currentBody = body;
 
-    if (extractorParallelEnabled && patternsList.length) {
+    if (runParallel) {
       const results = await Promise.all(patternsList.map((pattern) => runInspectionPhase({
         phase,
         bodyText: currentBody,
@@ -693,14 +697,22 @@ async function handle(r) {
     return { status: fallbackResult.status, body: currentBody };
   }
 
-  if (extractorParallelEnabled) {
-    if (redactRequestEnabled || redactResponseEnabled) {
-      log({ step: 'extractors:parallel_mode_disables_redaction' }, 'info');
-    }
+  if (wantParallel && inspectRequestEnabled && redactRequestEnabled) {
+    log({ step: 'forward_mode:parallel_request_redaction_disabled' }, 'info');
     redactRequestEnabled = false;
-    redactResponseEnabled = false;
-    parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled;
   }
+
+  if (parallelRequestExtractors && redactRequestEnabled) {
+    log({ step: 'extractors:parallel_request_disables_redaction' }, 'info');
+    redactRequestEnabled = false;
+  }
+
+  if (parallelResponseExtractors && redactResponseEnabled) {
+    log({ step: 'extractors:parallel_response_disables_redaction' }, 'info');
+    redactResponseEnabled = false;
+  }
+
+  parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled;
 
   try {
     log(`sideband: ${r.method} ${r.uri} from ${r.remoteAddress}`, 'info');
@@ -712,7 +724,7 @@ async function handle(r) {
     if (wantParallel && !inspectRequestEnabled) {
       log({ step: 'forward_mode:degraded', reason: 'request inspection disabled' }, 'debug');
     }
-    if (wantParallel && redactRequestEnabled) {
+    if (wantParallel && inspectRequestEnabled && redactRequestEnabled) {
       log({ step: 'forward_mode:degraded', reason: 'request redaction enabled' }, 'info');
     }
     log({
@@ -745,7 +757,8 @@ async function handle(r) {
       fallbackPaths: requestFallbackPaths,
       patternsList: requestPatterns,
       inspectEnabled: inspectRequestEnabled,
-      redactEnabled: redactRequestEnabled
+      redactEnabled: redactRequestEnabled,
+      parallelExtractors: parallelRequestExtractors
     });
 
     if (requestResult.status === 'blocked') {
@@ -784,7 +797,8 @@ async function handle(r) {
       fallbackPaths: responseFallbackPaths,
       patternsList: responsePatterns,
       inspectEnabled: inspectResponseEnabled,
-      redactEnabled: redactResponseEnabled
+      redactEnabled: redactResponseEnabled,
+      parallelExtractors: parallelResponseExtractors
     });
 
     if (responseResult.status === 'blocked') {

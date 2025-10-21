@@ -42,6 +42,9 @@
       const { useState, useEffect, useMemo, useRef } = React;
 
       const DEFAULT_HOST = '__default__';
+      const STORAGE_KEYS = {
+        selectedHost: 'guardrails:last-selected-host'
+      };
 
       function normalizeHost(value) {
         if (!value) return DEFAULT_HOST;
@@ -51,6 +54,25 @@
 
       function hostDisplayLabel(host) {
         return host === DEFAULT_HOST ? 'Default (__default__)' : host;
+      }
+
+      function readPersistedHost() {
+        if (typeof window === 'undefined' || !window.localStorage) return null;
+        try {
+          const raw = window.localStorage.getItem(STORAGE_KEYS.selectedHost);
+          return raw ? normalizeHost(raw) : null;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function persistSelectedHost(host) {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        try {
+          window.localStorage.setItem(STORAGE_KEYS.selectedHost, normalizeHost(host));
+        } catch (_) {
+          // Ignore storage failures (e.g., private browsing).
+        }
       }
 
       function hydrateExtractorList(value, fallback = []) {
@@ -84,6 +106,80 @@
           responseExtractors,
           extractorParallelEnabled: !!raw.extractorParallelEnabled
         };
+      }
+
+      function inspectDirectionEnabled(mode, direction) {
+        const normalized = String(mode || '').toLowerCase();
+        if (direction === 'request') {
+          return normalized === 'both' || normalized === 'request';
+        }
+        if (direction === 'response') {
+          return normalized === 'both' || normalized === 'response';
+        }
+        return false;
+      }
+
+      function parseRedactMode(mode) {
+        const normalized = String(mode || '').toLowerCase();
+        if (normalized === 'both') return new Set(['request', 'response']);
+        if (normalized === 'request') return new Set(['request']);
+        if (normalized === 'response') return new Set(['response']);
+        return new Set();
+      }
+
+      function formatRedactMode(contexts) {
+        const hasRequest = contexts.has('request');
+        const hasResponse = contexts.has('response');
+        if (hasRequest && hasResponse) return 'both';
+        if (hasRequest) return 'request';
+        if (hasResponse) return 'response';
+        return 'off';
+      }
+
+      function computeEffectiveRedactMode(config) {
+        if (!config) return 'off';
+        const contexts = parseRedactMode(config.redactMode);
+        const inspectMode = config.inspectMode;
+        if (!inspectDirectionEnabled(inspectMode, 'request')) contexts.delete('request');
+        if (!inspectDirectionEnabled(inspectMode, 'response')) contexts.delete('response');
+
+        if (config.requestForwardMode === 'parallel' && inspectDirectionEnabled(inspectMode, 'request')) {
+          contexts.delete('request');
+        }
+
+        if (config.extractorParallelEnabled) {
+          const requestParallel = Array.isArray(config.requestExtractors) && config.requestExtractors.length > 0;
+          const responseParallel = Array.isArray(config.responseExtractors) && config.responseExtractors.length > 0;
+          if (requestParallel && inspectDirectionEnabled(inspectMode, 'request')) {
+            contexts.delete('request');
+          }
+          if (responseParallel && inspectDirectionEnabled(inspectMode, 'response')) {
+            contexts.delete('response');
+          }
+        }
+
+        return formatRedactMode(contexts);
+      }
+
+      function describeRedactionConstraints(config) {
+        if (!config) return '';
+        const parts = [];
+        const inspectMode = config.inspectMode;
+        if (config.requestForwardMode === 'parallel' && inspectDirectionEnabled(inspectMode, 'request')) {
+          parts.push('Request redaction pauses while forwarding runs in parallel.');
+        }
+        if (config.extractorParallelEnabled) {
+          const requestParallel = Array.isArray(config.requestExtractors) && config.requestExtractors.length > 0 && inspectDirectionEnabled(inspectMode, 'request');
+          const responseParallel = Array.isArray(config.responseExtractors) && config.responseExtractors.length > 0 && inspectDirectionEnabled(inspectMode, 'response');
+          if (requestParallel && responseParallel) {
+            parts.push('Parallel extractors disable redaction for both directions.');
+          } else if (requestParallel) {
+            parts.push('Parallel request extractors disable request redaction.');
+          } else if (responseParallel) {
+            parts.push('Parallel response extractors disable response redaction.');
+          }
+        }
+        return parts.join(' ');
       }
 
       const NAV_SECTIONS = [
@@ -240,122 +336,6 @@
         </section>
       ));
 
-      const PathListEditor = ({ label, helper, paths, onChange }) => {
-        const [draft, setDraft] = useState(() => (paths && paths.length ? paths : ['']));
-
-        useEffect(() => {
-          setDraft(paths && paths.length ? paths : ['']);
-        }, [paths]);
-
-        const update = (index, next) => {
-          const copy = [...draft];
-          copy[index] = next;
-          setDraft(copy);
-          onChange(copy);
-        };
-
-        const remove = index => {
-          const copy = draft.filter((_, idx) => idx !== index);
-          const next = copy.length ? copy : [''];
-          setDraft(next);
-          onChange(next);
-        };
-
-        const add = () => {
-          const copy = [...draft, ''];
-          setDraft(copy);
-          onChange(copy);
-        };
-
-        const move = (index, direction) => {
-          const target = index + direction;
-          if (target < 0 || target >= draft.length) return;
-          const copy = [...draft];
-          const temp = copy[target];
-          copy[target] = copy[index];
-          copy[index] = temp;
-          setDraft(copy);
-          onChange(copy);
-        };
-
-        return (
-          <div className="space-y-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-700">{label}</p>
-                {helper && <p className="text-sm text-slate-500">{helper}</p>}
-              </div>
-              <button
-                type="button"
-                onClick={add}
-                className="inline-flex items-center gap-2 rounded-lg border border-primary px-3 py-1.5 text-sm font-medium text-primary shadow-sm hover:bg-primary/10"
-              >
-                <span className="text-base leading-none">＋</span>
-                Add Selector
-              </button>
-            </div>
-            <div className="space-y-3">
-              {draft.map((path, index) => {
-                const trimmed = (path || '').trim();
-                const hasError = trimmed.length === 0;
-                return (
-                  <div
-                    key={index}
-                    className={`flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center ${
-                      hasError ? 'border-rose-200 bg-rose-50/40' : 'border-slate-200'
-                    }`}
-                  >
-                    <div className="flex w-full items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
-                        {index + 1}
-                      </span>
-                      <input
-                        type="text"
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-primary focus:ring-primary"
-                        placeholder=".messages[-1].content"
-                        value={path}
-                        onChange={event => update(index, event.target.value)}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 self-start sm:self-center">
-                      <button
-                        type="button"
-                        onClick={() => move(index, -1)}
-                        className="rounded-md border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                        disabled={index === 0}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => move(index, 1)}
-                        className="rounded-md border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                        disabled={index === draft.length - 1}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(index)}
-                        className="rounded-md border border-rose-200 px-3 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-40"
-                        disabled={draft.length === 1}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    {hasError && (
-                      <p className="text-xs text-rose-600 sm:pl-11">
-                        Selector cannot be empty.
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      };
-
       const StickyNav = ({ activeSection, onNavigate, isDirty }) => (
         <aside className="lg:sticky lg:top-24">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -396,13 +376,18 @@
 
       const SummaryChips = ({ config }) => {
         if (!config) return null;
+        const configuredRedact = config.redactMode && String(config.redactMode).trim() ? config.redactMode : 'off';
+        const effectiveRedact = computeEffectiveRedactMode(config);
+        const redactChip = configuredRedact === effectiveRedact
+          ? effectiveRedact
+          : `${configuredRedact} → ${effectiveRedact}`;
         const chips = [
           { label: 'Inspect', value: config.inspectMode },
           { label: 'Forwarding', value: config.requestForwardMode || '—' },
-          { label: 'Redact', value: config.redactMode },
+          { label: 'Redact', value: redactChip },
           { label: 'Log Level', value: config.logLevel },
-          { label: 'Request Paths', value: (config.requestPaths || []).length },
-          { label: 'Response Paths', value: (config.responsePaths || []).length }
+          { label: 'Request Profiles', value: (config.requestExtractors || []).length },
+          { label: 'Response Profiles', value: (config.responseExtractors || []).length }
         ];
         return (
           <div className="flex flex-wrap gap-3">
@@ -528,6 +513,7 @@
 
       const ConfigApp = () => {
         const sectionRefs = useRef({});
+        const hasSyncedHostRef = useRef(false);
         const [status, setStatus] = useState({ tone: 'loading', message: 'Loading configuration…' });
         const [config, setConfig] = useState(null);
         const [serverConfig, setServerConfig] = useState(null);
@@ -558,8 +544,6 @@
           requestForwardMode: (cfg && cfg.requestForwardMode) || '',
           redactMode: (cfg && cfg.redactMode) || '',
           logLevel: (cfg && cfg.logLevel) || '',
-          requestPaths: (cfg && cfg.requestPaths ? cfg.requestPaths.filter(Boolean).map(item => item.trim()) : []),
-          responsePaths: (cfg && cfg.responsePaths ? cfg.responsePaths.filter(Boolean).map(item => item.trim()) : []),
           requestExtractors: (cfg && Array.isArray(cfg.requestExtractors) ? cfg.requestExtractors : []),
           responseExtractors: (cfg && Array.isArray(cfg.responseExtractors) ? cfg.responseExtractors : []),
           extractorParallelEnabled: !!(cfg && cfg.extractorParallelEnabled)
@@ -607,6 +591,8 @@
           [responseExtractorIds, patternMaps]
         );
         const extractorParallelEnabled = !!(config && config.extractorParallelEnabled);
+        const effectiveRedactMode = useMemo(() => computeEffectiveRedactMode(config), [config]);
+        const redactionConstraints = useMemo(() => describeRedactionConstraints(config), [config]);
 
         const registerSection = id => el => {
           if (el) {
@@ -681,6 +667,14 @@
             const message = `Unable to load configuration: ${error.message}`;
             setStatus({ tone: 'error', message });
             pushToast('error', message);
+            if (targetHost !== DEFAULT_HOST) {
+              const fallbackHost = DEFAULT_HOST;
+              setSelectedHost(fallbackHost);
+              persistSelectedHost(fallbackHost);
+              setTimeout(() => {
+                fetchConfig(fallbackHost);
+              }, 0);
+            }
           }
         };
 
@@ -700,16 +694,30 @@
         };
 
         useEffect(() => {
-          fetchConfig(DEFAULT_HOST);
+          const persistedHost = readPersistedHost();
+          const targetHost = persistedHost || DEFAULT_HOST;
+          setSelectedHost(targetHost);
+          fetchConfig(targetHost);
           fetchPatterns();
         }, []);
 
+        useEffect(() => {
+          if (!hasSyncedHostRef.current) {
+            hasSyncedHostRef.current = true;
+            return;
+          }
+          persistSelectedHost(selectedHost);
+        }, [selectedHost]);
+
         const handleSelectChange = (key, value) => {
           setConfig(prev => ({ ...prev, [key]: value }));
-        };
-
-        const handlePathsChange = (key, values) => {
-          setConfig(prev => ({ ...prev, [key]: values }));
+          if (key === 'requestForwardMode') {
+            if (value === 'parallel') {
+              pushToast('info', 'Parallel forwarding disables request redaction during inspection.');
+            } else {
+              pushToast('info', 'Sequential forwarding respects your configured request redaction.');
+            }
+          }
         };
 
         const handlePatternToggle = (context, patternId, checked) => {
@@ -731,11 +739,12 @@
         const handleParallelToggle = enabled => {
           setConfig(prev => ({
             ...prev,
-            extractorParallelEnabled: enabled,
-            redactMode: enabled ? 'off' : prev.redactMode
+            extractorParallelEnabled: enabled
           }));
           if (enabled) {
-            pushToast('info', 'Parallel extractor mode enabled; redaction set to off.');
+            pushToast('info', 'Parallel extractor mode enabled; redaction pauses for affected directions.');
+          } else {
+            pushToast('info', 'Sequential extractor mode restored; redaction follows your selection.');
           }
         };
 
@@ -744,10 +753,8 @@
           setConfig({
             inspectMode: defaults.inspectMode,
             requestForwardMode: defaults.requestForwardMode,
-            redactMode: defaults.extractorParallelEnabled ? 'off' : defaults.redactMode,
+            redactMode: defaults.redactMode,
             logLevel: defaults.logLevel,
-            requestPaths: [...(defaults.requestPaths || [])],
-            responsePaths: [...(defaults.responsePaths || [])],
             requestExtractors: [...(defaults.requestExtractors || [])],
             responseExtractors: [...(defaults.responseExtractors || [])],
             extractorParallelEnabled: !!defaults.extractorParallelEnabled
@@ -774,13 +781,12 @@
           const responseExtractors = Array.isArray(config.responseExtractors)
             ? config.responseExtractors.map(item => String(item).trim()).filter(Boolean)
             : [];
+          const redactModePayload = config.redactMode && String(config.redactMode).trim() ? config.redactMode : 'off';
           const payload = {
             inspectMode: config.inspectMode,
             requestForwardMode: config.requestForwardMode,
-            redactMode: config.extractorParallelEnabled ? 'off' : config.redactMode,
+            redactMode: redactModePayload,
             logLevel: config.logLevel,
-            requestPaths: (config.requestPaths || []).map(item => item.trim()).filter(Boolean),
-            responsePaths: (config.responsePaths || []).map(item => item.trim()).filter(Boolean),
             requestExtractors,
             responseExtractors,
             extractorParallelEnabled: !!config.extractorParallelEnabled
@@ -989,7 +995,7 @@
                   />
                   <SelectField
                     label="Request Forwarding"
-                    helper="Sequential waits for scan results (required when request redaction is enabled). Parallel dispatches upstream immediately and is available when request redaction is off."
+                    helper="Sequential waits for scan results and works with request redaction. Parallel dispatches upstream immediately and pauses request redaction during inspection."
                     options={derivedOptions.requestForwardMode}
                     value={config.requestForwardMode}
                     onChange={value => handleSelectChange('requestForwardMode', value)}
@@ -999,8 +1005,8 @@
                 <SectionCard
                   ref={registerSection('extraction')}
                   id="extraction"
-                  title="Extraction Profiles & Paths"
-                  description="Select which patterns supply extraction selectors and API keys, then refine fallback selectors for unmatched traffic."
+                  title="Extraction Profiles"
+                  description="Select which patterns supply extraction selectors and API keys."
                 >
                   <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
                     <div>
@@ -1024,36 +1030,22 @@
                     label="Request Extraction Profiles"
                     helper="Selected profiles supply their own selectors and API keys."
                     note={extractorParallelEnabled
-                      ? 'All selected request profiles execute in parallel (redaction off).'
+                      ? 'All selected request profiles execute in parallel; request redaction is skipped while this mode is active.'
                       : 'Profiles evaluate in selection order; the first match determines the scan.'}
                     patterns={patternMaps.contextMap.request}
                     values={requestExtractorIds}
                     onToggle={(patternId, checked) => handlePatternToggle('request', patternId, checked)}
                   />
 
-                  <PathListEditor
-                    label="Fallback Request Selectors"
-                    helper="Used when no request patterns match; always applied when no profiles are selected."
-                    paths={config.requestPaths || []}
-                    onChange={value => handlePathsChange('requestPaths', value)}
-                  />
-
                   <PatternMultiSelector
                     label="Response Extraction Profiles"
                     helper="Select patterns that control response extraction and API keys."
                     note={extractorParallelEnabled
-                      ? 'All selected response profiles execute in parallel (redaction off).'
+                      ? 'All selected response profiles execute in parallel; response redaction is skipped while this mode is active.'
                       : 'Profiles evaluate in selection order; the first match determines the scan.'}
                     patterns={patternMaps.contextMap.response}
                     values={responseExtractorIds}
                     onToggle={(patternId, checked) => handlePatternToggle('response', patternId, checked)}
-                  />
-
-                  <PathListEditor
-                    label="Fallback Response Selectors"
-                    helper="Used when no response patterns match; always applied when no profiles are selected."
-                    paths={config.responsePaths || []}
-                    onChange={value => handlePathsChange('responsePaths', value)}
                   />
                 </SectionCard>
 
@@ -1065,13 +1057,12 @@
                 >
                   <SelectField
                     label="Redaction Mode"
-                    helper={extractorParallelEnabled
-                      ? 'Parallel extractor mode forces redaction off.'
-                      : 'Enable redaction for request, response, both, or disable it entirely.'}
+                    helper={redactionConstraints
+                      ? `${redactionConstraints} Effective redaction: ${effectiveRedactMode}.`
+                      : `Effective redaction: ${effectiveRedactMode}. Choose request, response, both, or off.`}
                     options={derivedOptions.redactMode}
                     value={config.redactMode}
                     onChange={value => handleSelectChange('redactMode', value)}
-                    disabled={extractorParallelEnabled}
                   />
                   <SelectField
                     label="Log Level"
@@ -1151,24 +1142,6 @@
           }
         };
         return [wrapped, pending];
-      }
-
-      function SelectorBadge({ label, onRemove }) {
-        return (
-          <span className="inline-flex items-center gap-2 rounded-full bg-slate-200/80 px-2.5 py-1 text-xs text-slate-700">
-            <span className="font-mono">{label}</span>
-            {onRemove ? (
-              <button
-                type="button"
-                className="rounded-full px-1 text-slate-500 hover:bg-slate-300 hover:text-slate-800"
-                onClick={onRemove}
-                aria-label={`Remove selector ${label}`}
-              >
-                ✕
-              </button>
-            ) : null}
-          </span>
-        );
       }
 
       const SummaryPill = ({ label, value }) => (
@@ -1280,6 +1253,8 @@
           }
         }, [bodyText]);
 
+        const rootSelector = onSelect ? (path => onSelect(path || '.')) : undefined;
+
         return (
           <section className="space-y-3">
             <header className="flex items-center justify-between">
@@ -1295,7 +1270,7 @@
                       value={parsed.value}
                       path=""
                       depth={0}
-                      onSelect={path => onSelect(path || '.')}
+                      onSelect={rootSelector}
                     />
                   ) : typeof parsed.value === 'object' && parsed.value !== null ? (
                     Object.keys(parsed.value).length ? (
@@ -2309,9 +2284,6 @@
         const [status, setStatus] = useState({ tone: 'muted', message: '' });
         const [loading, setLoading] = useState(true);
         const [collector, setCollector] = useState({ total: 0, remaining: 0, entries: [] });
-        const [config, setConfig] = useState({ requestPaths: [], responsePaths: [] });
-        const [requestSelectors, setRequestSelectors] = useState([]);
-        const [responseSelectors, setResponseSelectors] = useState([]);
         const [collectInput, setCollectInput] = useState('3');
         const [expandedEntries, setExpandedEntries] = useState([]);
 
@@ -2319,16 +2291,6 @@
         const quotaRemaining = collector.remaining || 0;
 
         const notify = (tone, message) => setStatus({ tone, message });
-
-        const loadConfig = async () => {
-          const resp = await fetch('/config/api', { method: 'GET' });
-          if (!resp.ok) throw new Error('Failed to load config');
-          const data = await resp.json();
-          const cfg = data && data.config ? data.config : {};
-          setConfig(cfg);
-          setRequestSelectors(cfg.requestPaths || []);
-          setResponseSelectors(cfg.responsePaths || []);
-        };
 
         const loadCollector = async () => {
           const resp = await fetch('/collector/api', { method: 'GET' });
@@ -2347,10 +2309,10 @@
         useEffect(() => {
           (async () => {
             try {
-              await Promise.all([loadConfig(), loadCollector()]);
+              await loadCollector();
               notify('info', 'Collector state synced.');
             } catch (err) {
-              notify('error', err.message || 'Failed to load initial state.');
+              notify('error', err.message || 'Failed to load collector state.');
             } finally {
               setLoading(false);
             }
@@ -2392,43 +2354,6 @@
             notify('error', err.message || 'Refresh failed.');
           }
         });
-
-        const [handleSave, saving] = useAsyncCallback(async () => {
-          const payload = {
-            requestPaths: requestSelectors,
-            responsePaths: responseSelectors
-          };
-          const resp = await fetch('/config/api', {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          if (!resp.ok) {
-            notify('error', 'Failed to save selectors.');
-            return;
-          }
-          const data = await resp.json();
-          const cfg = data && data.config ? data.config : payload;
-          setConfig(cfg);
-          notify('success', 'Selectors saved to scan configuration.');
-        });
-
-        const addSelector = (target, selector) => {
-          if (!selector || selector === '.') return;
-          if (target === 'request') {
-            setRequestSelectors(prev => (prev.includes(selector) ? prev : [...prev, selector].slice(0, MAX_SELECTORS)));
-          } else {
-            setResponseSelectors(prev => (prev.includes(selector) ? prev : [...prev, selector].slice(0, MAX_SELECTORS)));
-          }
-        };
-
-        const removeSelector = (target, selector) => {
-          if (target === 'request') {
-            setRequestSelectors(prev => prev.filter(item => item !== selector));
-          } else {
-            setResponseSelectors(prev => prev.filter(item => item !== selector));
-          }
-        };
 
         const isExpanded = id => expandedEntries.includes(id);
 
@@ -2502,68 +2427,11 @@
             </section>
 
             <section className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-              <header className="mb-4">
-                <h2 className="text-lg font-semibold text-slate-800">Selector Builder</h2>
-                <p className="text-sm text-slate-500">
-                  Click any key within a payload tree to append it to the appropriate selector list.
-                  You can capture up to {MAX_SELECTORS} selectors per side.
-                </p>
-              </header>
-              <div className="grid gap-6 md:grid-cols-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-700">Request Selectors</h3>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {requestSelectors.length ? (
-                      requestSelectors.map(selector => (
-                        <SelectorBadge
-                          key={selector}
-                          label={selector}
-                          onRemove={() => removeSelector('request', selector)}
-                        />
-                      ))
-                    ) : (
-                      <p className="text-sm text-slate-500">No request selectors chosen yet.</p>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-700">Response Selectors</h3>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {responseSelectors.length ? (
-                      responseSelectors.map(selector => (
-                        <SelectorBadge
-                          key={selector}
-                          label={selector}
-                          onRemove={() => removeSelector('response', selector)}
-                        />
-                      ))
-                    ) : (
-                      <p className="text-sm text-slate-500">No response selectors chosen yet.</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={saving}
-                  className={classNames(
-                    'inline-flex items-center justify-center rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow',
-                    saving ? 'opacity-70' : 'hover:bg-emerald-700'
-                  )}
-                >
-                  {saving ? 'Saving…' : 'Save Selectors'}
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
               <header className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-800">Collected Entries</h2>
                   <p className="text-sm text-slate-500">
-                    Entries collapse by default. Click to expand and inspect full payloads.
+                    Expand an entry to inspect captured request and response payloads.
                   </p>
                 </div>
                 <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -2600,12 +2468,10 @@
                             <PayloadTree
                               title="Request Payload"
                               bodyText={(entry.request && entry.request.body) || ''}
-                              onSelect={selector => addSelector('request', selector)}
                             />
                             <PayloadTree
                               title="Response Payload"
                               bodyText={(entry.response && entry.response.body) || ''}
-                              onSelect={selector => addSelector('response', selector)}
                             />
                           </div>
                         ) : null}
