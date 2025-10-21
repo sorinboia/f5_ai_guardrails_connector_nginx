@@ -110,8 +110,6 @@ async function handlePatch(r, log) {
   if (applied.inspectModeError) applyErrors.push(applied.inspectModeError);
   if (applied.redactModeError) applyErrors.push(applied.redactModeError);
   if (applied.logLevelError) applyErrors.push(applied.logLevelError);
-  if (applied.requestPathsError) applyErrors.push(applied.requestPathsError);
-  if (applied.responsePathsError) applyErrors.push(applied.responsePathsError);
   if (applied.requestForwardModeError) applyErrors.push(applied.requestForwardModeError);
   if (applied.requestExtractorsError) applyErrors.push(applied.requestExtractorsError);
   if (applied.responseExtractorsError) applyErrors.push(applied.responseExtractorsError);
@@ -178,8 +176,6 @@ async function handlePost(r, log) {
     if (applied.inspectModeError) createErrors.push(applied.inspectModeError);
     if (applied.redactModeError) createErrors.push(applied.redactModeError);
     if (applied.logLevelError) createErrors.push(applied.logLevelError);
-    if (applied.requestPathsError) createErrors.push(applied.requestPathsError);
-    if (applied.responsePathsError) createErrors.push(applied.responsePathsError);
     if (applied.requestForwardModeError) createErrors.push(applied.requestForwardModeError);
     if (applied.requestExtractorsError) createErrors.push(applied.requestExtractorsError);
     if (applied.responseExtractorsError) createErrors.push(applied.responseExtractorsError);

@@ -298,8 +298,6 @@ export const SCAN_CONFIG_DEFAULTS = {
   inspectMode: 'both',
   redactMode: 'both',
   logLevel: 'info',
-  requestPaths: ['.messages[-1].content'],
-  responsePaths: ['.message.content'],
   requestForwardMode: 'sequential',
   requestExtractor: '',
   responseExtractor: '',
@@ -337,38 +335,6 @@ function readVariable(r, name) {
     return String(val);
   } catch (_) {
     return undefined;
-  }
-}
-
-function normalizePathsInput(input, fallback) {
-  if (Array.isArray(input)) {
-    const trim = [];
-    for (let i = 0; i < input.length; i++) {
-      const value = input[i];
-      if (value === undefined || value === null) continue;
-      const str = String(value).trim();
-      if (str) trim.push(str);
-    }
-    return trim.length ? trim : fallback;
-  }
-  if (typeof input === 'string') {
-    const items = input
-      .split(/\r?\n|,/)
-      .map((part) => part.trim())
-      .filter((part) => !!part);
-    return items.length ? items : fallback;
-  }
-  return fallback;
-}
-
-function parsePathsVariable(text, fallback) {
-  if (!text) return fallback;
-  try {
-    const parsed = JSON.parse(text);
-    const normalized = normalizePathsInput(parsed, fallback);
-    return normalized.length ? normalized : fallback;
-  } catch (_) {
-    return normalizePathsInput(text, fallback);
   }
 }
 
@@ -485,14 +451,6 @@ export function readScanConfig(r) {
     SCAN_CONFIG_ENUMS.logLevel,
     SCAN_CONFIG_DEFAULTS.logLevel
   );
-  const requestPathsDefault = parsePathsVariable(
-    readVariable(r, 'scan_config_default_request_paths'),
-    SCAN_CONFIG_DEFAULTS.requestPaths
-  );
-  const responsePathsDefault = parsePathsVariable(
-    readVariable(r, 'scan_config_default_response_paths'),
-    SCAN_CONFIG_DEFAULTS.responsePaths
-  );
   const forwardDefault = normalizeEnum(
     readVariable(r, 'scan_config_default_request_forward_mode'),
     SCAN_CONFIG_ENUMS.requestForwardMode,
@@ -547,14 +505,6 @@ export function readScanConfig(r) {
       readVariable(r, 'scan_config_log_level', logDefault),
       SCAN_CONFIG_ENUMS.logLevel,
       logDefault
-    ),
-    requestPaths: parsePathsVariable(
-      readVariable(r, 'scan_config_request_paths'),
-      requestPathsDefault
-    ),
-    responsePaths: parsePathsVariable(
-      readVariable(r, 'scan_config_response_paths'),
-      responsePathsDefault
     ),
     requestForwardMode: normalizeEnum(
       readVariable(r, 'scan_config_request_forward_mode', forwardDefault),
@@ -618,21 +568,11 @@ export function validateConfigPatch(patch) {
   }
 
   if (patch.requestPaths !== undefined) {
-    const normalized = normalizePathsInput(patch.requestPaths, []);
-    if (!normalized.length) {
-      errors.push('requestPaths must contain at least one JSON path string.');
-    } else {
-      updates.requestPaths = normalized;
-    }
+    errors.push('requestPaths is no longer supported.');
   }
 
   if (patch.responsePaths !== undefined) {
-    const normalized = normalizePathsInput(patch.responsePaths, []);
-    if (!normalized.length) {
-      errors.push('responsePaths must contain at least one JSON path string.');
-    } else {
-      updates.responsePaths = normalized;
-    }
+    errors.push('responsePaths is no longer supported.');
   }
 
   if (patch.requestForwardMode !== undefined) {
@@ -735,24 +675,6 @@ export function applyConfigPatch(r, updates, host) {
     }
   }
 
-  if (updates.requestPaths !== undefined) {
-    try {
-      r.variables.scan_config_request_paths = JSON.stringify(updates.requestPaths);
-      applied.requestPaths = updates.requestPaths;
-    } catch (err) {
-      applied.requestPathsError = String(err);
-    }
-  }
-
-  if (updates.responsePaths !== undefined) {
-    try {
-      r.variables.scan_config_response_paths = JSON.stringify(updates.responsePaths);
-      applied.responsePaths = updates.responsePaths;
-    } catch (err) {
-      applied.responsePathsError = String(err);
-    }
-  }
-
   if (updates.requestForwardMode !== undefined) {
     try {
       r.variables.scan_config_request_forward_mode = updates.requestForwardMode;
@@ -801,8 +723,6 @@ export function clearHostConfig(r, host) {
     'scan_config_inspect_mode',
     'scan_config_redact_mode',
     'scan_config_log_level',
-    'scan_config_request_paths',
-    'scan_config_response_paths',
     'scan_config_request_forward_mode',
     'scan_config_request_extractor',
     'scan_config_response_extractor',

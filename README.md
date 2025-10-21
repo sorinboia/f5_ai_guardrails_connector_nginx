@@ -43,7 +43,6 @@ This configuration turns NGINX into an AI safety reverse proxy that inspects eve
    - You may also use the configuration API (see below) to override defaults at runtime.
 4. **Populate default scan settings** by seeding `scan_config_*` variables (e.g., via `js_set`, `set`, or `kv`). The defaults are:
    - `inspectMode=both`, `redactMode=both`, `logLevel=info`, `requestForwardMode=sequential`.
-   - `requestPaths=['.messages[-1].content']`, `responsePaths=['.message.content']`.
 5. **Validate & reload**:
    - `nginx -t -c /etc/nginx/nginx.conf`
    - `nginx -s reload`
@@ -72,8 +71,6 @@ This configuration turns NGINX into an AI safety reverse proxy that inspects eve
 - `scan_config_inspect_mode`
 - `scan_config_redact_mode`
 - `scan_config_log_level`
-- `scan_config_request_paths`
-- `scan_config_response_paths`
 - `scan_config_request_forward_mode`
 
 The configuration API writes these safely using `applyConfigPatch`, letting you persist changes without touching disk files.
@@ -83,8 +80,9 @@ All responses are JSON with `cache-control: no-store`.
 
 ### `/config/api`
 - `GET` → Current config plus server-enforced defaults/enums.
-- `PATCH` → Body with any of: `inspectMode`, `redactMode`, `logLevel`, `requestPaths`, `responsePaths`, `requestForwardMode`. Validation errors return `400`.
+- `PATCH` → Body with any of: `inspectMode`, `redactMode`, `logLevel`, `requestForwardMode`, `requestExtractors`, `responseExtractors`, `extractorParallelEnabled`. Validation errors return `400`.
 - `OPTIONS` → CORS hints for browser clients.
+  - Note: legacy `requestPaths` and `responsePaths` fields were removed; the proxy now relies on built-in selector defaults.
 
 ### `/collector/api`
 - `GET` → Returns `{ total, remaining, entries[] }`.
@@ -111,7 +109,7 @@ curl -X POST http://localhost:11434/collector/api \
 ## UI Usage
 1. Navigate to `http://<host>:11434/config/ui`.
 2. The React app loads current settings via `/config/api` and mirrors any updates you submit.
-3. Use the sidebar to adjust inspection modes, redaction, extraction paths, logging level, and request forwarding.
+3. Use the sidebar to adjust inspection modes, redaction, extraction profiles, logging level, and request forwarding.
 4. The UI surfaces toaster notifications for API successes/errors; inspect browser devtools for detailed payloads during troubleshooting.
 5. To customize branding or helper copy, edit `html/scanner-config.html` and reload NGINX.
 
