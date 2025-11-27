@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Guardrails Scan Configuration</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="/config/" />
+    <link rel="stylesheet" href="./css/scanner-config.css" />
+    <script src="./js/tailwind-config.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-slate-100 text-slate-900">
+    <div class="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 py-10">
+      <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <header class="mb-10 text-center">
+          <p class="text-sm uppercase tracking-wide text-slate-500">Calypso Guardrails</p>
+          <h1 class="mt-2 text-4xl font-semibold text-slate-900">Scanning Control Panel</h1>
+          <p class="mt-4 text-base text-slate-600">
+            Refine how the proxy inspects traffic, redacts sensitive content, and records telemetry. Updates persist immediately to the NGINX key-value store.
+          </p>
+        </header>
+        <div id="root"></div>
+      </div>
+    </div>
+
+    <script type="text/babel" data-presets="react" src="./js/scanner-shared.jsx"></script>
+    <script type="text/babel" data-presets="react" src="./js/scanner-config-view.jsx"></script>
+    <script type="text/babel" data-presets="react" src="./js/scanner-keys-view.jsx"></script>
+    <script type="text/babel" data-presets="react" src="./js/scanner-patterns-view.jsx"></script>
+    <script type="text/babel" data-presets="react" src="./js/scanner-collector-view.jsx"></script>
+    <script type="text/babel" data-presets="react" src="./js/scanner-bootstrap.jsx"></script>
+  </body>
+</html>

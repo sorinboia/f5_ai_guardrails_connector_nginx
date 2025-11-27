@@ -1,0 +1,16 @@
+/* Additional styling for the Guardrails scanner configuration UI */
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+/* Ensure overlays and collectors respect viewport height on small screens */
+body, html {
+  min-height: 100%;
+}
