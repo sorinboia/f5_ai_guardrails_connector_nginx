@@ -1,0 +1,8 @@
+{
+  "model": "llama3.1:8b",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "BLOCK_ME should pass because inspection is disabled." }
+  ],
+  "stream": false
+}

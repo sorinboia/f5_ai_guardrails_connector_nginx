@@ -17,6 +17,8 @@ This file inventories the test suites we will add under `tests/` and the configu
   - Chat-style JSON with `.messages[-1].content` containing safe text.
   - Payload with PII/secret markers to trigger redaction (`password=secret123`, `ssn: 123-45-6789`).
   - Streaming SSE transcript mirroring LLM deltas.
+  - Streaming boundary and final-inspection variants (`stream_boundary_chat.json`, `stream_final_chat.json`).
+  - Inspection override bodies (`inspect_off_chat.json`) and large payload stressor (`large_chat.json`).
 - `tests/fixtures/config/`:
   - Default host config (`__default__`) matching SPEC defaults.
   - Host override example (`api.example.com`) with `inspectMode=request`, `backendOrigin=http://127.0.0.1:18080`, `requestExtractors=["pat_req"]`, `responseExtractors=["pat_resp"]`, `extractorParallelEnabled=true`.
@@ -68,8 +70,9 @@ This file inventories the test suites we will add under `tests/` and the configu
 
 - **Streaming Inspection**
   - SSE detection on `text/event-stream` and `data:` lines.
-  - Chunk inspection with configured `responseStreamChunkSize`/`responseStreamChunkOverlap`.
-  - Final inspection when `responseStreamFinalEnabled=true`; no redaction while streaming.
+  - Chunk inspection with configured `responseStreamChunkSize`/`responseStreamChunkOverlap`, including tokens split across chunk boundaries.
+  - Heartbeat/comment lines (`: keep-alive`) are ignored while streaming.
+  - Final inspection toggle validates pass-through when disabled and blocking when enabled.
 
 - **Backend Origin Resolution (`utils.backendOriginVar`)**
   - Correct URI from per-host config; preserves scheme/host; rejects invalid values.
@@ -77,7 +80,15 @@ This file inventories the test suites we will add under `tests/` and the configu
 
 - **Logging & Telemetry**
   - `pattern_result` log lines contain `pattern_id`, `api_key_name`, and outcome.
-  - Log level respects `X-Sideband-Log` overrides (`debug|info|warn|err`).
+  - Log level respects `X-Sideband-Log` overrides (`debug|info|warn|err`) and appears in error logs.
+
+- **Config Persistence & Cache Hygiene**
+  - Guardrails config snapshot at `/var/cache/nginx/guardrails_config.json` records new hosts, retains `__default__`, and cleans up deletes.
+
+- **Fixture Breadth & Header Overrides**
+  - Inspection can be turned off via `X-Sideband-Inspect: off` (BLOCK_ME should pass). 
+  - Request-only inspection via `X-Sideband-Inspect: request` leaves response flags untouched.
+  - Large payloads still proxy successfully without truncation.
 
 ## Execution Plan (future files)
 - Unit-like njs scripts under `tests/njs/` to exercise helpers (`utils.js`, `redaction.js`, `sideband_client.js`) via `njs -n QuickJS`.
@@ -86,7 +97,8 @@ This file inventories the test suites we will add under `tests/` and the configu
 
 ## Current Assets
 - Stub servers: `tests/servers/stub_servers.py` launches both backend (port 18080) and Guardrails (port 18081) emulators used by integration tests.
-- Integration harness: `tests/integration/run_all.sh` starts stubs, seeds API keys/patterns/config for `tests.local`, runs curl-based checks (pass-through, block, redaction success/failure, response and streaming blocks), and validates collector captures. Run from repo root: `tests/integration/run_all.sh`.
+  - Backend exposes `/api/stream-boundary`, `/api/stream-final`, and `/api/stream-noise` SSE routes to exercise chunk overlap, final inspection, and heartbeat handling.
+- Integration harness: `tests/integration/run_all.sh` starts stubs, seeds API keys/patterns/config for `tests.local`, runs curl-based checks (pass-through, block, redaction success/failure, response/streaming blocks, boundary/final streaming cases, log assertions, config cache persistence, header overrides, large payload), and validates collector captures. Run from repo root: `tests/integration/run_all.sh`.
 
 ## Cleanup Requirements
 - Each test must restore shared dict contents to the default snapshot (or delete the cache file) to avoid cross-test contamination.

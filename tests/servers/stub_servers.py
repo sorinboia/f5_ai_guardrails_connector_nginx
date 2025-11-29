@@ -29,6 +29,20 @@ def read_json(body):
 class BackendHandler(BaseHTTPRequestHandler):
   server_version = "TestsBackend/1.0"
 
+  def _send_sse(self, chunks, delay=0.05, include_heartbeat=False):
+    """Send a simple SSE stream with provided chunks."""
+    self.send_response(200)
+    self.send_header("content-type", "text/event-stream")
+    self.end_headers()
+    for chunk in chunks:
+      data = f"data: {chunk}\n\n".encode("utf-8")
+      self.wfile.write(data)
+      self.wfile.flush()
+      time.sleep(delay)
+      if include_heartbeat:
+        self.wfile.write(b": keep-alive\n\n")
+        self.wfile.flush()
+
   def _read_body(self):
     length = int(self.headers.get("content-length", "0") or "0")
     data = self.rfile.read(length) if length else b""
@@ -53,18 +67,38 @@ class BackendHandler(BaseHTTPRequestHandler):
 
     if path == "/api/stream":
       # SSE-style stream with two chunks; the second contains STREAM_FLAG to trigger blocking.
-      self.send_response(200)
-      self.send_header("content-type", "text/event-stream")
-      self.end_headers()
       chunks = [
         json.dumps({"choices": [{"delta": {"content": "Hello from stream chunk 1."}}]}),
         json.dumps({"choices": [{"delta": {"content": "STREAM_FLAG found in chunk 2."}}]})
       ]
-      for chunk in chunks:
-        data = f"data: {chunk}\n\n".encode("utf-8")
-        self.wfile.write(data)
-        self.wfile.flush()
-        time.sleep(0.05)
+      self._send_sse(chunks)
+      return
+
+    if path == "/api/stream-boundary":
+      # STREAM_FLAG split across two chunks to exercise chunk overlap logic.
+      chunks = [
+        json.dumps({"choices": [{"delta": {"content": "ChunkA STREAM_FLA"}}]}),
+        json.dumps({"choices": [{"delta": {"content": "G appears on next chunk."}}]})
+      ]
+      self._send_sse(chunks)
+      return
+
+    if path == "/api/stream-final":
+      # No per-chunk flag; only combined payload should trigger on final inspection.
+      chunks = [
+        json.dumps({"choices": [{"delta": {"content": "Partial STREAM_"}}]}),
+        json.dumps({"choices": [{"delta": {"content": "FLAG tail"}}]})
+      ]
+      self._send_sse(chunks)
+      return
+
+    if path == "/api/stream-noise":
+      # Interleave heartbeats and data lines to ensure parser ignores comments.
+      chunks = [
+        json.dumps({"choices": [{"delta": {"content": "Heartbeat prelude."}}]}),
+        json.dumps({"choices": [{"delta": {"content": "STREAM_FLAG after heartbeat."}}]})
+      ]
+      self._send_sse(chunks, include_heartbeat=True)
       return
 
     if path == "/api/response-flag":
