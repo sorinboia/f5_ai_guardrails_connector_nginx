@@ -44,6 +44,7 @@ There is no formal test harness yet; prioritize targeted CLI checks.
 When adding helpers, supply an inline QuickJS snippet or dedicated script under a future `njs/tests/` directory and run it with `njs -q`. 
 Capture representative request/response bodies in fixtures, and verify both blocked and pass-through flows with `curl` smoke tests. 
 Document manual scenarios in commit messages until automated coverage lands.
+- All automated and manual test plans live under `tests/`; `tests/README.md` is the source of truth for what the tests cover and the required config/fixtures. Whenever you add or change tests, update `tests/README.md` in the same change set so it stays accurate.
 
 ## Commit & Pull Request Guidelines
 Adopt Conventional Commit prefixes (`feat:`, `fix:`, `chore:`) so automation can group changes once CI is introduced. 

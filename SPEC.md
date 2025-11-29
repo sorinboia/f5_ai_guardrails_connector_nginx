@@ -9,6 +9,7 @@ This document is the source of truth for the behaviour implemented under `/etc/n
 - **Shared state**: `nginx.conf` creates `js_shared_dict_zone zone=guardrails_config:16m state=/var/cache/nginx/guardrails_config.json`, giving durable key‑value storage for scan config, API keys, patterns, and collector entries.
 - **DNS & TLS for outbound fetch**: `conf.d/guardrails_connector.conf` sets `resolver 1.1.1.1 8.8.8.8 ipv6=off` and `js_fetch_trusted_certificate /etc/ssl/certs/ca-certificates.crt` for `ngx.fetch` in `njs/sideband_client.js`.
 - **Upstream proxying**: traffic is forwarded via an internal location `/backend` that proxies to `$backend_origin_effective` (computed per request in `njs/utils.js::backendOriginVar` and cached in `r.variables.backend_origin_effective`). Host header is preserved; proxy buffering and temp files are disabled.
+- **Test host override**: when `Host` equals `tests.local`, `$sideband_url` is mapped to the local stub `http://127.0.0.1:18081/backend/v1/scans` so integration tests do not call the real Guardrails service; other hosts use the default Guardrails URL.
 - **Logging**: request servers log to `/var/log/nginx/sideband*.log` in `combined` format; the njs logger (`utils.makeLogger`) emits to request log context or `ngx.log`.
 
 ---

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "test-default",
+    "key": "test_default_key",
+    "blockingResponse": {
+      "status": 200,
+      "contentType": "application/json",
+      "body": { "message": "F5 AI Guardrails blocked this request" }
+    }
+  },
+  {
+    "name": "test-block",
+    "key": "test_block_key",
+    "blockingResponse": {
+      "status": 451,
+      "contentType": "application/json",
+      "body": { "message": "blocked by tests" }
+    }
+  }
+]

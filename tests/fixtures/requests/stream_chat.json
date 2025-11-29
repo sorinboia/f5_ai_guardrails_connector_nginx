@@ -1,0 +1,8 @@
+{
+  "model": "llama3.1:8b",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "Please stream a response that will include STREAM_FLAG later." }
+  ],
+  "stream": true
+}

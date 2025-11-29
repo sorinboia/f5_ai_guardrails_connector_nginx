@@ -1,0 +1,15 @@
+{
+  "host": "tests.local",
+  "config": {
+    "inspectMode": "both",
+    "redactMode": "both",
+    "logLevel": "debug",
+    "requestForwardMode": "sequential",
+    "backendOrigin": "http://127.0.0.1:18080",
+    "responseStreamEnabled": true,
+    "responseStreamChunkSize": 32,
+    "responseStreamChunkOverlap": 8,
+    "responseStreamFinalEnabled": true,
+    "responseStreamCollectFullEnabled": false
+  }
+}

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "pat-req-block",
+    "context": "request",
+    "apiKeyName": "test-block",
+    "paths": [".messages[-1].content"],
+    "matchers": [
+      { "path": ".messages[-1].content", "contains": "BLOCK_ME" }
+    ],
+    "notes": "Blocks when BLOCK_ME appears in user content."
+  },
+  {
+    "name": "pat-req-redact",
+    "context": "request",
+    "apiKeyName": "test-default",
+    "paths": [".messages[-1].content"],
+    "matchers": [
+      { "path": ".messages[-1].content", "contains": "REDACT_ME" }
+    ],
+    "notes": "Redacts secret markers."
+  },
+  {
+    "name": "pat-req-redact-fail",
+    "context": "request",
+    "apiKeyName": "test-default",
+    "paths": [".messages[-1].content"],
+    "matchers": [
+      { "path": ".messages[-1].content", "contains": "REDACT_FAIL" }
+    ],
+    "notes": "Forces redaction failure when matches do not overlap."
+  },
+  {
+    "name": "pat-resp-flag",
+    "context": "response",
+    "apiKeyName": "test-block",
+    "paths": [".message.content"],
+    "matchers": [
+      { "path": ".message.content", "contains": "RESP_FLAG" }
+    ],
+    "notes": "Blocks flagged response content."
+  },
+  {
+    "name": "pat-stream-flag",
+    "context": "response_stream",
+    "apiKeyName": "test-block",
+    "paths": [],
+    "matchers": [],
+    "notes": "Blocks streaming response chunks via Guardrails outcome when STREAM_FLAG appears."
+  }
+]
