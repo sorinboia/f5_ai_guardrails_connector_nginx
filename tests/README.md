@@ -11,6 +11,7 @@ This file inventories the test suites we will add under `tests/` and the configu
 - TLS: use the repo’s self-signed certs in `certs/sideband-local.crt|key` for 443 scenarios or switch servers to plaintext for local runs.
 - Logging: assertions read `/var/log/nginx/sideband*.log` for structured fields (e.g., `pattern_result`, `pattern_id`, `api_key_name`).
 - QuickJS tooling: `njs -n QuickJS -p njs -m <module>` is available for unit-style checks of helper modules.
+- All integration cases send requests with `Host: tests.local`; each case pushes its own `config.json` before executing requests.
 
 ## Fixtures to Prepare
 - `tests/fixtures/requests/` sample bodies:
@@ -86,19 +87,24 @@ This file inventories the test suites we will add under `tests/` and the configu
   - Guardrails config snapshot at `/var/cache/nginx/guardrails_config.json` records new hosts, retains `__default__`, and cleans up deletes.
 
 - **Fixture Breadth & Header Overrides**
-  - Inspection can be turned off via `X-Sideband-Inspect: off` (BLOCK_ME should pass). 
-  - Request-only inspection via `X-Sideband-Inspect: request` leaves response flags untouched.
-  - Large payloads still proxy successfully without truncation.
+- Inspection can be turned off via `X-Sideband-Inspect: off` (BLOCK_ME should pass). 
+- Request-only inspection via `X-Sideband-Inspect: request` leaves response flags untouched.
+- Large payloads still proxy successfully without truncation.
 
-## Execution Plan (future files)
-- Unit-like njs scripts under `tests/njs/` to exercise helpers (`utils.js`, `redaction.js`, `sideband_client.js`) via `njs -n QuickJS`.
-- HTTP integration scripts under `tests/integration/` using `curl`/`bash` to hit management APIs and data paths; each script seeds fixtures, runs assertions, and cleans shared dict state.
-- End-to-end flows under `tests/e2e/` that spin up backend/Guardrails stubs, send representative chat requests (blocking, redaction, pass-through, streaming), and validate responses plus collector output and logs.
+## Execution Plan
+- Unit-like njs scripts under `tests/njs/` to exercise helpers (`utils.js`, `redaction.js`, `sideband_client.js`) via `njs -n QuickJS`. (still TODO)
+- HTTP integration scripts now live one-per-case under `tests/integration/cases/<case>/client.sh`; each script starts its own stub server, pushes the per-case `config.json` (host `tests.local`), seeds keys/patterns, runs assertions, and cleans up temp artifacts.
+- `tests/integration/run_all.sh` iterates every case (or a provided subset) so suites can be run individually or in bulk.
+- Future: end-to-end flows under `tests/e2e/` that spin up backend/Guardrails stubs, send representative chat requests (blocking, redaction, pass-through, streaming), and validate responses plus collector output and logs.
 
 ## Current Assets
 - Stub servers: `tests/servers/stub_servers.py` launches both backend (port 18080) and Guardrails (port 18081) emulators used by integration tests.
   - Backend exposes `/api/stream-boundary`, `/api/stream-final`, and `/api/stream-noise` SSE routes to exercise chunk overlap, final inspection, and heartbeat handling.
-- Integration harness: `tests/integration/run_all.sh` starts stubs, seeds API keys/patterns/config for `tests.local`, runs curl-based checks (pass-through, block, redaction success/failure, response/streaming blocks, boundary/final streaming cases, log assertions, config cache persistence, header overrides, large payload), and validates collector captures. Run from repo root: `tests/integration/run_all.sh`.
+- Per-case integration scripts: `tests/integration/cases/*/client.sh` each push their own `config.json` (host `tests.local`), start a local stub (`server.py`), seed API keys/patterns, and assert the specific behaviour.
+  - Example: `tests/integration/cases/pass_through/client.sh` (200 passthrough), `.../stream_final` (toggle stream inspection), `.../config_persistence` (add/remove extra host), etc.
+- Runner: `tests/integration/run_all.sh` executes all cases or a named subset:  
+  - `tests/integration/run_all.sh` (everything)  
+  - `tests/integration/run_all.sh stream_flag logging_pattern_result`
 
 ## Cleanup Requirements
 - Each test must restore shared dict contents to the default snapshot (or delete the cache file) to avoid cross-test contamination.
