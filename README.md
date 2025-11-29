@@ -142,6 +142,7 @@ Guardrails blocks return HTTP 200 with the message defined in `buildBlockedBody`
 - **Configuration safety**: keep `REQUEST_PATHS_DEFAULT` and `RESPONSE_PATHS_DEFAULT` aligned with your model schema; use `/config/api` patches for overrides.
 - **Secrets**: never commit live Guardrails tokens—inject via environment variables or an external secret manager.
 - **Parallel forwarding**: only enable (`requestForwardMode=parallel`) when request redaction is disabled; otherwise the handler falls back to sequential mode.
+- **Integration tests**: each scenario lives under `tests/integration/cases/<case>/client.sh`, which seeds `tests.local` config, starts stub servers, and runs assertions. Execute a single case directly or run many via `tests/integration/run_all.sh` (accepts optional case names).
 
 ## Operational Tips
 - Rotate Guardrails credentials by updating the env variables and reloading (`nginx -s reload`); the runtime store will pick them up without downtime.
