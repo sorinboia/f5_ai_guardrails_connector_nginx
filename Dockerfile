@@ -5,6 +5,8 @@ RUN apk update && \
     apk add --no-cache nginx-module-njs mitmproxy
 # Ensure shared dict state path is writable by nginx worker processes.
 RUN mkdir -p /var/cache/nginx && chown -R nginx:nginx /var/cache/nginx
+# Shared mitmproxy home so certs are readable by nginx for download.
+RUN mkdir -p /var/lib/mitmproxy && chmod 755 /var/lib/mitmproxy
 # Copy custom global config (falls back to image default if missing).
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY fastcgi.conf fastcgi_params scgi_params uwsgi_params mime.types /etc/nginx/
@@ -27,4 +29,4 @@ COPY html/ /etc/nginx/html/
 COPY mitmproxy.py /etc/nginx/mitmproxy.py
 
 EXPOSE 11434 11443 10000
-CMD ["sh", "-c", "mitmdump --mode regular --listen-host 0.0.0.0 --listen-port 10000 -s /etc/nginx/mitmproxy.py --ssl-insecure & exec nginx -g 'daemon off;'"]
+CMD ["sh", "-c", "umask 022; mkdir -p /var/lib/mitmproxy; mitmdump --set confdir=/var/lib/mitmproxy --mode regular --listen-host 0.0.0.0 --listen-port 10000 -s /etc/nginx/mitmproxy.py --ssl-insecure & exec nginx -g 'daemon off;'"]
