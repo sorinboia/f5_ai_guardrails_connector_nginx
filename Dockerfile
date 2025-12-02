@@ -3,6 +3,8 @@ FROM nginx:1.29-alpine
 
 RUN apk update && \
     apk add --no-cache nginx-module-njs mitmproxy
+# Ensure shared dict state path is writable by nginx worker processes.
+RUN mkdir -p /var/cache/nginx && chown -R nginx:nginx /var/cache/nginx
 # Copy custom global config (falls back to image default if missing).
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY fastcgi.conf fastcgi_params scgi_params uwsgi_params mime.types /etc/nginx/
