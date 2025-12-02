@@ -157,6 +157,7 @@
 
   const NAV_SECTIONS = [
     { id: 'overview', label: 'Overview' },
+    { id: 'mitm', label: 'MITM Certificates' },
     { id: 'inspection', label: 'Inspection Modes' },
     { id: 'extraction', label: 'Extraction Paths' },
     { id: 'streaming', label: 'Response Streaming' },
