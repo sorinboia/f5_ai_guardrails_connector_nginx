@@ -2,7 +2,7 @@ FROM nginx:1.29-alpine
 
 
 RUN apk update && \
-    apk add --no-cache nginx-module-njs
+    apk add --no-cache nginx-module-njs mitmproxy
 # Copy custom global config (falls back to image default if missing).
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY fastcgi.conf fastcgi_params scgi_params uwsgi_params mime.types /etc/nginx/
@@ -21,5 +21,8 @@ COPY certs/ /etc/nginx/certs/
 # Copy site/application assets into the default web root.
 COPY html/ /etc/nginx/html/
 
-EXPOSE 11434 11443
-CMD ["nginx", "-g", "daemon off;"]
+# mitmproxy add-on for traffic redirection.
+COPY mitmproxy.py /etc/nginx/mitmproxy.py
+
+EXPOSE 11434 11443 10000
+CMD ["sh", "-c", "mitmdump --mode regular --listen-host 0.0.0.0 --listen-port 10000 -s /etc/nginx/mitmproxy.py --ssl-insecure & exec nginx -g 'daemon off;'"]

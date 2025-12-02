@@ -17,6 +17,7 @@ After a successful check, apply updates with `nginx -s reload`.
 For script sanity, run `njs -n QuickJS -p njs -m <script>`
 Use `curl -H "Content-Type: application/json" --data @payload.json https://127.0.0.1:11434/api/chat` for end-to-end smoke tests against the local proxy.
 After doing any changes you need to take action and verify them by reloading the nginx config doing curl commnads.
+The Docker image built from this repo is published/tagged as `sorinboiaf5/f5-ai-connector:latest`; run with `-p 11434:11434 -p 11443:11443 -p 10000:10000` and optional `-e MITM_TARGETS=...` to enable the mitm sidecar.
 
 
 For example when you try that all is working you need to trigger a request and inspect the logs. Bellow is an example of a request that you can try.

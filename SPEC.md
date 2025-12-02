@@ -11,6 +11,7 @@ This document is the source of truth for the behaviour implemented under `/etc/n
 - **Upstream proxying**: traffic is forwarded via an internal location `/backend` that proxies to `$backend_origin_effective` (computed per request in `njs/utils.js::backendOriginVar` and cached in `r.variables.backend_origin_effective`). Host header is preserved; proxy buffering and temp files are disabled.
 - **Test host override**: when `Host` equals `tests.local`, `$sideband_url` is mapped to the local stub `http://127.0.0.1:18081/backend/v1/scans` so integration tests do not call the real Guardrails service; other hosts use the default Guardrails URL.
 - **Logging**: request servers log to `/var/log/nginx/sideband*.log` in `combined` format; the njs logger (`utils.makeLogger`) emits to request log context or `ngx.log`.
+- **Mitm sidecar**: `mitmdump` runs alongside NGINX using `/etc/nginx/mitmproxy.py` to retarget specific domains to fixed upstream IP/port pairs. Targets come from env `MITM_TARGETS` formatted `domain=host:port[,domain=host:port...]` (scheme defaults to https; `http://` or `https://` prefixes override). If unset, it defaults to `chatgpt.com=127.0.0.1:443`. Listens on `0.0.0.0:10000`.
 
 ---
 ## 2) External Interface (Ports & Locations)
@@ -24,6 +25,7 @@ This document is the source of truth for the behaviour implemented under `/etc/n
 - **Redirect helpers**: `/collector/ui` redirects to `/config/ui`.
 - **Bypass path**: `/api/tags` proxies directly to `$backend_origin_effective` without inspection or body mutation.
 - **Internal upstream**: `/backend` (internal) receives subrequests from `sideband.handle`; `/backend$uri$is_args$args` forwards to the configured origin.
+- **Auxiliary proxy**: `mitmdump` listens on TCP port `10000` and applies `mitmproxy.py` rules (no web UI).
 
 ---
 ## 3) Request-Scope Variables & Header Maps (`conf.d/guardrails_connector.conf`)
@@ -185,7 +187,8 @@ All reads/writes funnel through `readSharedJson`, `writeSharedJson`, `readShared
 - `njs/patterns_api.js` — pattern CRUD with context/matcher rules.
 - `njs/collector_store.js` / `njs/collector_api.js` — sample capture quota and API.
 - `html/` — compiled management UI assets served under `/config/ui`.
-- `Dockerfile` — image build copying configs, njs scripts, certs, and exposing 11434/11443.
+- `mitmproxy.py` — mitmdump addon redirecting configured domains to fixed upstream IP/port targets via `MITM_TARGETS`.
+- `Dockerfile` — image build copying configs, njs scripts, certs, mitmdump addon, and exposing 11434/11443/10000.
 
 ---
 ## 12) Behavioural Invariants (acceptance criteria)
