@@ -11,6 +11,11 @@ Place future helpers alongside the existing modules, and favor small, focused fi
 - **When adding or changing features/behaviour**, you must update `SPEC.md` in the same change set so the spec and code never drift. Treat spec updates as mandatory acceptance criteria for feature work and fixes.
 - **How to use it**: read it first to understand current behaviour; update the relevant sections (API field reference, pipeline flow, invariants) whenever you modify code paths. Reviewers should reject changes that lack corresponding SPEC updates.
 
+## Migration Plan (MIGRATION.md)
+- `MIGRATION.md` tracks the Node.js migration plan. Every migration-related change set must update this file with current phase status, decisions, and deltas from the plan.
+- Before starting migration work, read `MIGRATION.md` to align on scope and locked decisions; keep it in sync as phases progress or reprioritize.
+- Pull requests touching migration tasks should reference the relevant plan items and note any drift or risks.
+
 ## Build, Test, and Development Commands
 Validate configuration changes with `nginx -t -c /etc/nginx/nginx.conf`; it catches syntax issues before reloads. 
 After a successful check, apply updates with `nginx -s reload`. 
