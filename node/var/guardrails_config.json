@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "hosts": [
+    "__default__"
+  ],
+  "hostConfigs": {
+    "__default__": {
+      "inspectMode": "both",
+      "redactMode": "both",
+      "logLevel": "info",
+      "requestForwardMode": "sequential",
+      "backendOrigin": "https://api.openai.com",
+      "requestExtractors": [],
+      "responseExtractors": [],
+      "extractorParallel": false,
+      "responseStreamEnabled": true,
+      "responseStreamChunkSize": 2048,
+      "responseStreamChunkOverlap": 128,
+      "responseStreamFinalEnabled": true,
+      "responseStreamCollectFullEnabled": false
+    }
+  },
+  "apiKeys": [],
+  "patterns": [],
+  "collector": {
+    "entries": [],
+    "total": 0,
+    "remaining": 0
+  }
+}

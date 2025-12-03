@@ -314,3 +314,11 @@ Keep this SPEC.md aligned with code whenever behaviour changes; it is the single
 - **Resolver/CA**: Outbound fetch relies on `resolver 1.1.1.1 8.8.8.8` and `js_fetch_trusted_certificate /etc/ssl/certs/ca-certificates.crt`; adjust if egress control differs.
 - **Fail-closed option**: In `njs/sideband.js`, uncomment the block near the final `catch` to return a block response instead of pass-through on exceptions.
 - **Parallel forwarding safety**: Auto-disabled when request redaction is active or request inspection is off; warning logged if redaction is ignored because upstream already dispatched.
+
+---
+## 19) Node Migration Status (WIP parity notes)
+- Location: Node prototype lives under `node/` (Fastify). It listens on HTTP `11434` and optional HTTPS `443` when `HTTPS_CERT`/`HTTPS_KEY` exist; static UI and management routes mirror the NGINX paths.
+- Upstream resolution: `backendOrigin` is chosen per request from the Node config store (`var/guardrails_config.json`) using the `Host`/`X-Guardrails-Config-Host` precedence. The outbound `Host` header is rewritten to that upstream, matching NGINX buffering/keepalive semantics.
+- Sideband client: `src/pipeline/sidebandClient.js` uses UA `njs-sideband/1.0`, timeout 5s, CA bundle `CA_BUNDLE` (default `/etc/ssl/certs/ca-certificates.crt`), bearer from `SIDEBAND_BEARER`, and a `tests.local` override to `http://127.0.0.1:18081/backend/v1/scans`.
+- Request inspection: a pre-handler (`src/pipeline/inspection.js`) runs when `inspectMode` enables requests, picks the first matching request pattern, calls the sideband service, and blocks on outcomes `flagged` or `redacted` using the API key’s `blockingResponse` (defaults mirror njs). Redaction is not yet applied in Node; `redacted` outcomes currently block instead of mutating the payload.
+- Gaps vs. NGINX (planned): response inspection/redaction, streaming chunk handling, collector recording, sequential/parallel forwarding behaviour, and response-mode toggles are pending; current Node pipeline otherwise fails open on sideband errors (status 599) and only enforces block on explicit `flagged`/`redacted` outcomes.
