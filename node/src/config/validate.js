@@ -114,13 +114,19 @@ export function validateConfigPatch(patch = {}) {
 
   if (patch.responseStreamChunkSize !== undefined) {
     const val = coerceInteger(patch.responseStreamChunkSize);
-    if (val === undefined || val <= 0) errors.push('responseStreamChunkSize must be positive integer');
+    if (val === undefined || val < 128 || val > 65536) errors.push('responseStreamChunkSize must be between 128 and 65536');
     else updates.responseStreamChunkSize = val;
   }
   if (patch.responseStreamChunkOverlap !== undefined) {
     const val = coerceInteger(patch.responseStreamChunkOverlap);
     if (val === undefined || val < 0) errors.push('responseStreamChunkOverlap must be non-negative integer');
     else updates.responseStreamChunkOverlap = val;
+  }
+
+  const size = updates.responseStreamChunkSize;
+  const overlap = updates.responseStreamChunkOverlap;
+  if (size !== undefined && overlap !== undefined && overlap >= size) {
+    errors.push('responseStreamChunkOverlap must be less than responseStreamChunkSize');
   }
 
   return { errors, updates };

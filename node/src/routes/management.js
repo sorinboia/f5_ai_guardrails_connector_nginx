@@ -2,6 +2,7 @@ import fp from 'fastify-plugin';
 import { normalizeHostName, resolveConfig, validateConfigPatch } from '../config/validate.js';
 import { respondJson, optionsReply, getHeaderHost, ensureHeaderMatchesHost } from './helpers.js';
 import { defaultStore, saveStore } from '../config/store.js';
+import { scheduleCollection, clearCollection } from '../pipeline/collector.js';
 
 function ensureHost(store, host) {
   const target = normalizeHostName(host);
@@ -348,24 +349,15 @@ async function collectorApi(fastify) {
     const payload = getBody(request);
     const store = fastify.store || defaultStore();
     if (payload.action === 'clear') {
-      store.collector.entries = [];
-      store.collector.total = 0;
-      store.collector.remaining = 0;
+      const next = clearCollection(store);
       saveStore(store, fastify.log, fastify.appConfig.storePath);
-      return respondJson(reply, 200, { total: 0, remaining: 0, entries: [] });
+      return respondJson(reply, 200, next);
     }
     const count = Number(payload.count ?? payload.collect ?? payload.collect_count ?? 0);
     if (Number.isNaN(count) || count < 0) return respondJson(reply, 400, { error: 'invalid_count' });
-    const clamped = Math.min(50, count);
-    store.collector.remaining = clamped;
-    store.collector.total = clamped;
-    store.collector.entries = [];
+    const next = scheduleCollection(store, count);
     saveStore(store, fastify.log, fastify.appConfig.storePath);
-    return respondJson(reply, 200, {
-      total: store.collector.total,
-      remaining: store.collector.remaining,
-      entries: store.collector.entries
-    });
+    return respondJson(reply, 200, next);
   });
 }
 

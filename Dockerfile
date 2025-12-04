@@ -1,32 +1,28 @@
-FROM nginx:1.29-alpine
+# Node-based image for the Guardrails connector (NGINX retired)
+FROM node:20-bookworm-slim
 
+ENV NODE_ENV=production
+WORKDIR /app/node
 
-RUN apk update && \
-    apk add --no-cache nginx-module-njs mitmproxy
-# Ensure shared dict state path is writable by nginx worker processes.
-RUN mkdir -p /var/cache/nginx && chown -R nginx:nginx /var/cache/nginx
-# Shared mitmproxy home so certs are readable by nginx for download.
-RUN mkdir -p /var/lib/mitmproxy && chmod 755 /var/lib/mitmproxy
-# Copy custom global config (falls back to image default if missing).
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY fastcgi.conf fastcgi_params scgi_params uwsgi_params mime.types /etc/nginx/
+# mitmproxy for optional MITM sidecar and cert generation
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends mitmproxy ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Copy any vhost / upstream configs.
-COPY conf.d/ /etc/nginx/conf.d/
+# Install dependencies
+COPY node/package*.json ./
+RUN npm ci --omit=dev
 
-# Copy server-side JS (njs) scripts.
-COPY njs/ /etc/nginx/njs/
+# Copy application source and runtime assets
+COPY node/src ./src
+COPY node/var ./var
+COPY html /etc/nginx/html
+COPY certs /etc/nginx/certs
+COPY mitmproxy.py /app/mitmproxy.py
 
-# Copy dynamic modules if present.
-
-# Copy TLS materials (optional but preserves local layout).
-COPY certs/ /etc/nginx/certs/
-
-# Copy site/application assets into the default web root.
-COPY html/ /etc/nginx/html/
-
-# mitmproxy add-on for traffic redirection.
-COPY mitmproxy.py /etc/nginx/mitmproxy.py
+# Ensure runtime directories exist
+RUN mkdir -p /var/lib/mitmproxy /var/log/connector
 
 EXPOSE 11434 11443 10000
-CMD ["sh", "-c", "umask 022; mkdir -p /var/lib/mitmproxy; mitmdump --set confdir=/var/lib/mitmproxy --mode regular --listen-host 0.0.0.0 --listen-port 10000 -s /etc/nginx/mitmproxy.py --ssl-insecure & exec nginx -g 'daemon off;'"]
+
+CMD ["bash", "-lc", "umask 022; mkdir -p /var/lib/mitmproxy; mitmdump --set confdir=/var/lib/mitmproxy --mode regular --listen-host 0.0.0.0 --listen-port 10000 -s /app/mitmproxy.py --ssl-insecure & exec node src/server.js"]

@@ -9,6 +9,8 @@ export const SCAN_CONFIG_DEFAULTS = {
   logLevel: 'info',
   requestForwardMode: 'sequential',
   backendOrigin: 'https://api.openai.com',
+  requestExtractor: '',
+  responseExtractor: '',
   requestExtractors: [],
   responseExtractors: [],
   extractorParallel: false,

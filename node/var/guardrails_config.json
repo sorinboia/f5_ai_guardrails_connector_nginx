@@ -1,7 +1,8 @@
 {
   "version": 1,
   "hosts": [
-    "__default__"
+    "__default__",
+    "chatgpt.com"
   ],
   "hostConfigs": {
     "__default__": {
@@ -18,6 +19,21 @@
       "responseStreamChunkOverlap": 128,
       "responseStreamFinalEnabled": true,
       "responseStreamCollectFullEnabled": false
+    },
+    "chatgpt.com": {
+      "inspectMode": "both",
+      "redactMode": "off",
+      "logLevel": "info",
+      "requestForwardMode": "sequential",
+      "backendOrigin": "https://api.openai.com",
+      "requestExtractors": [],
+      "responseExtractors": [],
+      "extractorParallel": false,
+      "responseStreamEnabled": true,
+      "responseStreamFinalEnabled": true,
+      "responseStreamCollectFullEnabled": false,
+      "responseStreamChunkSize": 2048,
+      "responseStreamChunkOverlap": 128
     }
   },
   "apiKeys": [],

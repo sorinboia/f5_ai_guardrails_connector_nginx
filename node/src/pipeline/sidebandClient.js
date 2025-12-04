@@ -29,7 +29,8 @@ export async function callSideband({
   caBundle,
   testsLocalOverride,
   hostHeader,
-  logger
+  logger,
+  ua = DEFAULT_UA
 }) {
   const targetUrl = (hostHeader && hostHeader.toLowerCase() === 'tests.local' && testsLocalOverride)
     ? testsLocalOverride
@@ -37,7 +38,7 @@ export async function callSideband({
 
   const headers = {
     'content-type': 'application/json; charset=utf-8',
-    'user-agent': DEFAULT_UA,
+    'user-agent': ua || DEFAULT_UA,
     authorization: `Bearer ${bearer}`
   };
 

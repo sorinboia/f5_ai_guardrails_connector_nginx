@@ -6,7 +6,9 @@
   "description": "Node.js migration of F5 AI Guardrails connector (Fastify proxy + management APIs)",
   "scripts": {
     "dev": "node src/server.js",
-    "start": "NODE_ENV=production node src/server.js"
+    "start": "NODE_ENV=production node src/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fastify/http-proxy": "^9.2.1",
@@ -14,5 +16,8 @@
     "fastify": "^4.28.0",
     "pino": "^9.0.0",
     "undici": "^6.19.2"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.15"
   }
 }
