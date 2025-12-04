@@ -3,7 +3,9 @@ import path from 'path';
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
 
-const UI_ROOT = path.resolve('/etc/nginx/html');
+// Serve static UI assets from the local repo by default so live reload picks up changes.
+// If a container binds a different path, override with UI_ROOT env (optional future hook).
+const UI_ROOT = path.resolve('../html');
 const MITM_HTTP_ROOT = '/var/lib/mitmproxy';
 const MITM_HTTPS_ROOT = '/root/.mitmproxy';
 

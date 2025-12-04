@@ -1,7 +1,8 @@
 {
   "version": 1,
   "hosts": [
-    "__default__"
+    "__default__",
+    "chatgpt.com"
   ],
   "hostConfigs": {
     "__default__": {
@@ -14,14 +15,35 @@
         "pat_1764838947684_6l41"
       ],
       "responseExtractors": [
-        "pat_1764842855066_gb96"
+        "pat_1764847226911_6ok6"
       ],
       "extractorParallel": false,
       "responseStreamEnabled": true,
-      "responseStreamChunkSize": 2048,
-      "responseStreamChunkOverlap": 128,
-      "responseStreamFinalEnabled": true,
-      "responseStreamCollectFullEnabled": false
+      "responseStreamChunkSize": 512,
+      "responseStreamChunkOverlap": 32,
+      "responseStreamFinalEnabled": false,
+      "responseStreamCollectFullEnabled": false,
+      "responseStreamBufferingMode": "passthrough"
+    },
+    "chatgpt.com": {
+      "inspectMode": "off",
+      "redactMode": "both",
+      "logLevel": "debug",
+      "requestForwardMode": "sequential",
+      "responseStreamBufferingMode": "passthrough",
+      "backendOrigin": "https://chatgpt.com",
+      "requestExtractors": [
+        "pat_1764838947684_6l41"
+      ],
+      "responseExtractors": [
+        "pat_1764847226911_6ok6"
+      ],
+      "extractorParallel": false,
+      "responseStreamEnabled": true,
+      "responseStreamFinalEnabled": false,
+      "responseStreamCollectFullEnabled": false,
+      "responseStreamChunkSize": 512,
+      "responseStreamChunkOverlap": 32
     }
   },
   "apiKeys": [
@@ -86,6 +108,17 @@
       "notes": "",
       "created_at": "2025-12-04T10:07:35.066Z",
       "updated_at": "2025-12-04T10:07:35.066Z"
+    },
+    {
+      "id": "pat_1764847226911_6ok6",
+      "name": "Response-Stream",
+      "context": "response_stream",
+      "apiKeyName": "Response",
+      "paths": [],
+      "matchers": [],
+      "notes": "",
+      "created_at": "2025-12-04T11:20:26.911Z",
+      "updated_at": "2025-12-04T11:20:26.911Z"
     }
   ],
   "collector": {

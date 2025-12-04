@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-API_BASE="http://127.0.0.1:11434"
+MGMT_BASE="http://127.0.0.1:22100"
+PROXY_BASE="http://127.0.0.1:22080"
 DEFAULT_KEYS_FIXTURE="$ROOT/fixtures/config/api_keys.json"
 DEFAULT_PATTERNS_FIXTURE="$ROOT/fixtures/config/patterns.json"
 
@@ -14,7 +15,7 @@ curl_json() {
     -H "Host: ${host_header}" \
     -H "Content-Type: application/json" \
     "$@" \
-    "${API_BASE}${path}"
+    "${MGMT_BASE}${path}"
 }
 
 start_stubs() {
@@ -50,11 +51,11 @@ cleanup_entities() {
 
 create_api_keys() {
   local host_header="$1"
-  ROOT="$ROOT" HOST_HEADER="$host_header" python3 - <<'PY'
+  ROOT="$ROOT" HOST_HEADER="$host_header" MGMT_BASE="$MGMT_BASE" python3 - <<'PY'
 import json, subprocess, pathlib, os
 root = pathlib.Path(os.environ["ROOT"])
 keys = json.loads((root / "fixtures/config/api_keys.json").read_text())
-url = "http://127.0.0.1:11434/config/api/keys"
+url = os.environ["MGMT_BASE"] + "/config/api/keys"
 headers = ["-H", f"Host: {os.environ['HOST_HEADER']}", "-H", "Content-Type: application/json"]
 for rec in keys:
     subprocess.check_call(["curl","-sS","-X","POST",*headers,"--data",json.dumps(rec),url], stdout=subprocess.DEVNULL)
@@ -63,11 +64,11 @@ PY
 
 create_patterns() {
   local host_header="$1"
-  ROOT="$ROOT" HOST_HEADER="$host_header" python3 - <<'PY'
+  ROOT="$ROOT" HOST_HEADER="$host_header" MGMT_BASE="$MGMT_BASE" python3 - <<'PY'
 import json, subprocess, pathlib, os
 root = pathlib.Path(os.environ["ROOT"])
 patterns = json.loads((root / "fixtures/config/patterns.json").read_text())
-url = "http://127.0.0.1:11434/config/api/patterns"
+url = os.environ["MGMT_BASE"] + "/config/api/patterns"
 headers = ["-H", f"Host: {os.environ['HOST_HEADER']}", "-H", "Content-Type: application/json"]
 for rec in patterns:
     subprocess.check_call(["curl","-sS","-X","POST",*headers,"--data",json.dumps(rec),url], stdout=subprocess.DEVNULL)
@@ -77,7 +78,7 @@ PY
 configure_host_from_file() {
   local host_header="$1"
   local config_file="$2"
-  HOST_HEADER="$host_header" ROOT="$ROOT" CONFIG_FILE="$config_file" python3 - <<'PY'
+  HOST_HEADER="$host_header" ROOT="$ROOT" CONFIG_FILE="$config_file" MGMT_BASE="$MGMT_BASE" python3 - <<'PY'
 import json, subprocess, pathlib, os, sys
 root = pathlib.Path(os.environ["ROOT"])
 cfg = json.loads(pathlib.Path(os.environ["CONFIG_FILE"]).read_text())
@@ -85,7 +86,7 @@ patterns = json.loads(subprocess.check_output([
     "curl","-sS","-X","GET",
     "-H", f"Host: {os.environ['HOST_HEADER']}",
     "-H", "Content-Type: application/json",
-    "http://127.0.0.1:11434/config/api/patterns"
+    os.environ["MGMT_BASE"] + "/config/api/patterns"
 ]))
 id_map = {item["name"]: item["id"] for item in patterns.get("items", [])}
 req_names = cfg.pop("requestExtractors", [])
@@ -102,7 +103,7 @@ subprocess.check_call([
     "-H", f"Host: {os.environ['HOST_HEADER']}",
     "-H", "Content-Type: application/json",
     "--data", json.dumps(payload),
-    "http://127.0.0.1:11434/config/api"
+    os.environ["MGMT_BASE"] + "/config/api"
 ], stdout=subprocess.DEVNULL)
 PY
 }
@@ -114,7 +115,7 @@ run_curl() {
   local outfile="$1"; shift
   local -a extra=("$@")
   local status
-  status=$(curl -s -o "$outfile" -w "%{http_code}" -H "Host: ${host_header}" -H "Content-Type: application/json" "${extra[@]}" --data @"$body_file" "${API_BASE}${path}")
+  status=$(curl -s -o "$outfile" -w "%{http_code}" -H "Host: ${host_header}" -H "Content-Type: application/json" "${extra[@]}" --data @"$body_file" "${PROXY_BASE}${path}")
   echo "$status"
 }
 

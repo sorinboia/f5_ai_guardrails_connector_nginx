@@ -77,7 +77,8 @@
       responseStreamChunkSize: toNumber(raw.responseStreamChunkSize, raw.responseStreamChunkSize === 0 ? 0 : undefined),
       responseStreamChunkOverlap: toNumber(raw.responseStreamChunkOverlap, raw.responseStreamChunkOverlap === 0 ? 0 : undefined),
       responseStreamFinalEnabled: !!raw.responseStreamFinalEnabled,
-      responseStreamCollectFullEnabled: !!raw.responseStreamCollectFullEnabled
+      responseStreamCollectFullEnabled: !!raw.responseStreamCollectFullEnabled,
+      responseStreamBufferingMode: raw.responseStreamBufferingMode || 'buffer'
     };
   }
 

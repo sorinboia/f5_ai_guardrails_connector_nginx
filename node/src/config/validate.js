@@ -5,6 +5,7 @@ export const SCAN_CONFIG_ENUMS = {
   redactMode: ['off', 'request', 'response', 'both', 'on', 'true'],
   logLevel: ['debug', 'info', 'warn', 'err'],
   requestForwardMode: ['sequential', 'parallel'],
+  responseStreamBufferingMode: ['buffer', 'passthrough'],
 };
 
 export function normalizeHostName(host) {
@@ -65,6 +66,12 @@ export function validateConfigPatch(patch = {}) {
     const val = String(patch.requestForwardMode).toLowerCase();
     if (!SCAN_CONFIG_ENUMS.requestForwardMode.includes(val)) errors.push('invalid requestForwardMode');
     else updates.requestForwardMode = val;
+  }
+
+  if (patch.responseStreamBufferingMode !== undefined) {
+    const val = String(patch.responseStreamBufferingMode).toLowerCase();
+    if (!SCAN_CONFIG_ENUMS.responseStreamBufferingMode.includes(val)) errors.push('invalid responseStreamBufferingMode');
+    else updates.responseStreamBufferingMode = val;
   }
 
   if (patch.backendOrigin !== undefined) {

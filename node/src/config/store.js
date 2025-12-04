@@ -19,6 +19,7 @@ export const SCAN_CONFIG_DEFAULTS = {
   responseStreamChunkOverlap: 128,
   responseStreamFinalEnabled: true,
   responseStreamCollectFullEnabled: false,
+  responseStreamBufferingMode: 'buffer',
 };
 
 function ensureDirExists(filePath) {

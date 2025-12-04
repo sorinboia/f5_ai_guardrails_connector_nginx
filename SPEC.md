@@ -4,7 +4,7 @@ This document is the canonical contract for the Node.js Fastify service that now
 
 ---
 ## 1) Runtime Topology
-- **Entrypoint**: `node/src/server.js` starts two Fastify instances: management/UI on HTTP port `22100` and the data plane proxy on HTTP `22080` plus (when cert/key exist) HTTPS `22443`. TLS assets default to `/etc/nginx/certs/sideband-local.crt|key` so existing cert mounts keep working.
+- **Entrypoint**: `node/src/server.js` starts two Fastify instances: management/UI on HTTP port `22100` and the data plane proxy on HTTP `22080` plus (when cert/key exist) HTTPS `22443`. TLS assets default to `../certs/sideband-local.crt|key` so the repo-local certs are used by default.
 - **Static assets**: Served from `/etc/nginx/html` by `node/src/routes/static.js` (`scanner-config.html` + `/config/css|js/*`).
 - **Config & state**: Persisted JSON file at `var/guardrails_config.json` (path overrideable via `CONFIG_STORE_PATH`). `server.js` watches the file for hot reload and mutates the in-memory store in place so route decorators stay valid.
 - **Forward proxy**: Node-owned listener on `0.0.0.0:10000` handles HTTP absolute-form requests and `CONNECT` tunnels. Destinations must already exist as hosts in the config store; unlisted hosts are rejected with `403`. Allowed targets are relayed to the local data-plane listeners (`http 22080` or `https 22443`, depending on the requested scheme) so the standard inspection pipeline runs.
@@ -32,7 +32,7 @@ This document is the canonical contract for the Node.js Fastify service that now
 - `SIDEBAND_URL` default `https://www.us1.calypsoai.app/backend/v1/scans`.
 - `SIDEBAND_BEARER` default empty; `SIDEBAND_UA` default `njs-sideband/1.0`; `SIDEBAND_TIMEOUT_MS` default `5000`.
 - `CA_BUNDLE` default `/etc/ssl/certs/ca-certificates.crt`.
-- `HTTP_PORT` default `22080`; `HTTPS_PORT` default `22443`; `MANAGEMENT_PORT` default `22100`; `HTTPS_CERT`/`HTTPS_KEY` default `/etc/nginx/certs/sideband-local.crt|key`; HTTPS enabled only if both files exist/read.
+- `HTTP_PORT` default `22080`; `HTTPS_PORT` default `22443`; `MANAGEMENT_PORT` default `22100`; `HTTPS_CERT`/`HTTPS_KEY` default `../certs/sideband-local.crt|key`; HTTPS enabled only if both files exist/read.
 - `FORWARD_PROXY_PORT` default `10000`; `FORWARD_PROXY_ENABLED` defaults to `true` (set to `false` to disable the listener).
 - `CONFIG_STORE_PATH` default `var/guardrails_config.json`.
 - `serviceName` fixed `f5-ai-connector-node` for logs; tests use stub sideband URL override when host `tests.local` is detected.

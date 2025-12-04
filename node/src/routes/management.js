@@ -67,7 +67,8 @@ async function configApi(fastify) {
         inspectMode: ['off', 'request', 'response', 'both'],
         redactMode: ['off', 'request', 'response', 'both'],
         logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel']
+        requestForwardMode: ['sequential', 'parallel'],
+        responseStreamBufferingMode: ['buffer', 'passthrough']
       },
       defaults: resolveConfig(store, '__default__')
     });
@@ -104,7 +105,8 @@ async function configApi(fastify) {
         inspectMode: ['off', 'request', 'response', 'both'],
         redactMode: ['off', 'request', 'response', 'both'],
         logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel']
+        requestForwardMode: ['sequential', 'parallel'],
+        responseStreamBufferingMode: ['buffer', 'passthrough']
       },
       defaults: resolveConfig(store, '__default__')
     });
@@ -140,7 +142,8 @@ async function configApi(fastify) {
         inspectMode: ['off', 'request', 'response', 'both'],
         redactMode: ['off', 'request', 'response', 'both'],
         logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel']
+        requestForwardMode: ['sequential', 'parallel'],
+        responseStreamBufferingMode: ['buffer', 'passthrough']
       },
       defaults: resolveConfig(store, '__default__')
     });
@@ -167,7 +170,8 @@ async function configApi(fastify) {
         inspectMode: ['off', 'request', 'response', 'both'],
         redactMode: ['off', 'request', 'response', 'both'],
         logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel']
+        requestForwardMode: ['sequential', 'parallel'],
+        responseStreamBufferingMode: ['buffer', 'passthrough']
       },
       defaults: config
     });

@@ -76,7 +76,7 @@
     const [config, setConfig] = useState(null);
     const [serverConfig, setServerConfig] = useState(null);
     const [defaults, setDefaults] = useState(null);
-    const [options, setOptions] = useState({ inspectMode: [], redactMode: [], logLevel: [], requestForwardMode: [] });
+    const [options, setOptions] = useState({ inspectMode: [], redactMode: [], logLevel: [], requestForwardMode: [], responseStreamBufferingMode: [] });
     const [updatedAt, setUpdatedAt] = useState(null);
     const [saving, setSaving] = useState(false);
     const [activeSection, setActiveSection] = useState(NAV_SECTIONS[0].id);
@@ -110,7 +110,8 @@
       responseStreamChunkSize: Number(cfg && cfg.responseStreamChunkSize) || 0,
       responseStreamChunkOverlap: Number(cfg && cfg.responseStreamChunkOverlap) || 0,
       responseStreamFinalEnabled: !!(cfg && cfg.responseStreamFinalEnabled),
-      responseStreamCollectFullEnabled: !!(cfg && cfg.responseStreamCollectFullEnabled)
+      responseStreamCollectFullEnabled: !!(cfg && cfg.responseStreamCollectFullEnabled),
+      responseStreamBufferingMode: (cfg && cfg.responseStreamBufferingMode) || 'buffer'
     });
 
     const isDirty = useMemo(() => {
@@ -122,7 +123,8 @@
       inspectMode: options.inspectMode || [],
       requestForwardMode: options.requestForwardMode || [],
       redactMode: options.redactMode || [],
-      logLevel: options.logLevel || []
+      logLevel: options.logLevel || [],
+      responseStreamBufferingMode: options.responseStreamBufferingMode || []
     }), [options]);
 
     const patternMaps = useMemo(() => {
@@ -344,7 +346,8 @@
         responseStreamChunkSize: defaults.responseStreamChunkSize,
         responseStreamChunkOverlap: defaults.responseStreamChunkOverlap,
         responseStreamFinalEnabled: !!defaults.responseStreamFinalEnabled,
-        responseStreamCollectFullEnabled: !!defaults.responseStreamCollectFullEnabled
+        responseStreamCollectFullEnabled: !!defaults.responseStreamCollectFullEnabled,
+        responseStreamBufferingMode: (defaults && defaults.responseStreamBufferingMode) || 'buffer'
       });
       const message = `Defaults staged for ${hostDisplayLabel(selectedHost)}. Save to persist.`;
       setStatus({ tone: 'info', message });
@@ -409,7 +412,8 @@
         responseStreamChunkSize,
         responseStreamChunkOverlap,
         responseStreamFinalEnabled: !!config.responseStreamFinalEnabled,
-        responseStreamCollectFullEnabled: !!config.responseStreamCollectFullEnabled
+        responseStreamCollectFullEnabled: !!config.responseStreamCollectFullEnabled,
+        responseStreamBufferingMode: config.responseStreamBufferingMode || 'buffer'
       };
       try {
         const response = await fetch('/config/api', {
@@ -772,6 +776,14 @@
                   <span className="block text-xs text-slate-500">Keeps the last full body inspection even when streaming is on.</span>
                 </span>
               </label>
+
+              <SelectField
+                label="Streaming Delivery Mode"
+                helper="Choose whether to buffer the full SSE body before sending or stream chunks directly to clients."
+                options={derivedOptions.responseStreamBufferingMode}
+                value={config.responseStreamBufferingMode || 'buffer'}
+                onChange={value => setConfig(prev => ({ ...prev, responseStreamBufferingMode: value }))}
+              />
             </SectionCard>
 
             <SectionCard

@@ -5,7 +5,7 @@ Tests now target the Fastify/Node connector (NGINX is retired). This file invent
 ## Test Environment & Prerequisites
 - Run unit/helper suites with `cd node && npm test` (Vitest).
 - For smokes, use `tests/smoke/node-shadow.sh` which launches backend + Guardrails stubs (ports 18080/18081) and the Node proxy on an alternate port (default 21434). It exercises pass/block/redact/stream flows and reports results.
-- HTTPS is optional; self-signed certs live in `certs/sideband-local.crt|key`. Provide `HTTPS_CERT`/`HTTPS_KEY` if you want the 22443 listener during tests.
+- HTTPS is optional; self-signed certs live in `certs/sideband-local.crt|key`. Those are now the defaults for `HTTPS_CERT`/`HTTPS_KEY`, so the 22443 listener starts automatically when running from the repo unless you override the env vars.
 - Forward proxy: Node listener on port 10000 validates destinations against the config store and relays to local HTTP/HTTPS for inspection. For most local tests you can ignore port 10000 unless explicitly exercising forward-proxy flows.
 
 ## Fixtures to Prepare

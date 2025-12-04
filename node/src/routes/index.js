@@ -18,7 +18,10 @@ function normalizeLogLevel(level, fallback) {
 
 // Registers static assets, management APIs, and the proxy pipeline.
 async function routes(fastify, opts) {
-  const backendOrigin = opts.backendOrigin;
+  const backendOrigin = opts.backendOrigin || fastify?.appConfig?.backendOrigin;
+  const enableStatic = opts.enableStatic ?? true;
+  const enableManagement = opts.enableManagement ?? true;
+  const enableProxy = opts.enableProxy ?? true;
 
   // Per-request logger level based on resolved host config or header override.
   fastify.addHook('onRequest', (request, reply, done) => {
@@ -36,13 +39,19 @@ async function routes(fastify, opts) {
   });
 
   // Static UI + MITM downloads.
-  fastify.register(staticRoutes);
+  if (enableStatic) {
+    fastify.register(staticRoutes);
+  }
 
   // Management APIs (placeholders for now).
-  fastify.register(managementRoutes);
+  if (enableManagement) {
+    fastify.register(managementRoutes);
+  }
 
   // Proxy pipeline (includes /api/tags passthrough and catch-all).
-  fastify.register(proxyRoutes, { backendOrigin });
+  if (enableProxy) {
+    fastify.register(proxyRoutes, { backendOrigin });
+  }
 }
 
 export default fp(routes);
