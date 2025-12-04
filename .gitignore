@@ -3,3 +3,4 @@ node/.npm/
 node/.cache/
 npm-debug.log*
 *.log
+guardrails_config.json

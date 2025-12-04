@@ -42,8 +42,9 @@
       "responseStreamEnabled": true,
       "responseStreamFinalEnabled": false,
       "responseStreamCollectFullEnabled": false,
-      "responseStreamChunkSize": 512,
-      "responseStreamChunkOverlap": 32
+      "responseStreamChunkSize": 128,
+      "responseStreamChunkOverlap": 16,
+      "responseStreamChunkGatingEnabled": true
     }
   },
   "apiKeys": [
