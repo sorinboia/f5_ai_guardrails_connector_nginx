@@ -134,8 +134,12 @@ export function validateConfigPatch(patch = {}) {
 
 export function resolveConfig(store, host) {
   const target = normalizeHostName(host);
+  const defaultCfg = store.hostConfigs?.__default__ || {};
   const hostCfg = store.hostConfigs?.[target] || {};
-  const merged = { ...SCAN_CONFIG_DEFAULTS, ...hostCfg };
+  // Inherit __default__ so new hosts get the same extractors/behaviour unless explicitly overridden.
+  const merged = target === '__default__'
+    ? { ...SCAN_CONFIG_DEFAULTS, ...defaultCfg }
+    : { ...SCAN_CONFIG_DEFAULTS, ...defaultCfg, ...hostCfg };
   merged.requestExtractor = merged.requestExtractors && merged.requestExtractors.length ? merged.requestExtractors[0] : '';
   merged.responseExtractor = merged.responseExtractors && merged.responseExtractors.length ? merged.responseExtractors[0] : '';
   merged.extractorParallelEnabled = merged.extractorParallel !== undefined ? merged.extractorParallel : merged.extractorParallelEnabled;

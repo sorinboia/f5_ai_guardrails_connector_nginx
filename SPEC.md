@@ -9,6 +9,7 @@ This document is the canonical contract for the Node.js Fastify service that now
 - **Config & state**: Persisted JSON file at `var/guardrails_config.json` (path overrideable via `CONFIG_STORE_PATH`). `server.js` watches the file for hot reload and mutates the in-memory store in place so route decorators stay valid.
 - **MITM sidecar**: Container runs `mitmdump` with addon `mitmproxy.py`; listens on `0.0.0.0:10000`. CA files are written to `/var/lib/mitmproxy/` (HTTP) or `/root/.mitmproxy/` (when TLS terminates upstream) and downloaded via `/config/mitm/mitmproxy-ca-cert.(pem|cer)`.
 - **Logging**: Pino logger in `node/src/logging/logger.js`; log level from env `LOG_LEVEL` (default `info`) or per-request overrides. Logs emit lower_snake_case fields consistent with previous telemetry.
+- **Logging**: Pino logger in `node/src/logging/logger.js`; base level from env `LOG_LEVEL` (default `info`). Effective level is resolved per request from the host config `logLevel` (inherit from `__default__`) and can be overridden via `X-Sideband-Log` (`debug|info|warn|err`). Request loggers carry `host_log_level` when elevated so sideband decisions are visible at debug without changing process-wide level. Logs emit lower_snake_case fields consistent with previous telemetry.
 
 ---
 ## 2) External Interface (Ports & Routes)
@@ -48,6 +49,7 @@ JSON file schema:
 ---
 ## 5) Configuration Resolution (`node/src/config/validate.js`)
 - **Host selection order**: explicit `host` arg → `X-Guardrails-Config-Host` header → HTTP `Host` header → `__default__`.
+- **Config inheritance**: a resolved host config inherits all fields from `__default__`; only keys overridden on the host entry differ. This keeps new/implicit hosts using the default extractor sets and modes until explicitly changed.
 - **Defaults**:
   - `inspectMode=both`, `redactMode=both`, `logLevel=info`, `requestForwardMode=sequential`, `backendOrigin=env BACKEND_ORIGIN`.
   - `requestExtractors=[]`, `responseExtractors=[]`, `extractorParallel=false`.
