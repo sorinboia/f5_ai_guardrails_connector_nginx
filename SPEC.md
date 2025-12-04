@@ -4,10 +4,10 @@ This document is the canonical contract for the Node.js Fastify service that now
 
 ---
 ## 1) Runtime Topology
-- **Entrypoint**: `node/src/server.js` starts two Fastify instances: management/UI on HTTP port `22100` and the data plane proxy on HTTP `22080` plus (when cert/key exist) HTTPS `22443`. TLS assets default to `../certs/sideband-local.crt|key` so the repo-local certs are used by default.
-- **Static assets**: Served from `/etc/nginx/html` by `node/src/routes/static.js` (`scanner-config.html` + `/config/css|js/*`).
+- **Entrypoint**: `node/src/server.js` starts two Fastify instances: management/UI on HTTP port `22100` and the data plane proxy on HTTP `22080` plus (when cert/key exist) HTTPS `22443`. TLS assets default to `../certs/sideband-local.crt|key` so the repo-local certs are used by default. When `DYNAMIC_CERTS_ENABLED=true` and `MITM_CA_CERT`/`MITM_CA_KEY` are provided, the HTTPS listener issues per-host leaf certificates on the fly using the supplied CA; otherwise it serves the static cert.
+- **Static assets**: Served from `/etc/nginx/html` by `node/src/routes/static.js` (`scanner-config.html` + `/config/css|js/*`). MITM/CA download endpoints expose the active TLS root at `/config/mitm/ca.pem` and `/config/mitm/ca.cer`; legacy mitmdump paths remain for backward compatibility.
 - **Config & state**: Persisted JSON file at `var/guardrails_config.json` (path overrideable via `CONFIG_STORE_PATH`). `server.js` watches the file for hot reload and mutates the in-memory store in place so route decorators stay valid.
-- **Forward proxy**: Node-owned listener on `0.0.0.0:10000` handles HTTP absolute-form requests and `CONNECT` tunnels. Destinations must already exist as hosts in the config store; unlisted hosts are rejected with `403`. Allowed targets are relayed to the local data-plane listeners (`http 22080` or `https 22443`, depending on the requested scheme) so the standard inspection pipeline runs.
+- **Forward proxy**: Node-owned listener on `0.0.0.0:10000` handles HTTP absolute-form requests and `CONNECT` tunnels. Destinations must already exist as hosts in the config store; unlisted hosts are rejected with `403`. Allowed targets are relayed to the local data-plane listeners (`http 22080` or `https 22443`, depending on the requested scheme) so the standard inspection pipeline runs. HTTPS CONNECT requests inherit the data-plane listener TLS behaviour (static cert by default; dynamic per-host certs when enabled).
 - **Logging**: Pino logger in `node/src/logging/logger.js`; log level from env `LOG_LEVEL` (default `info`) or per-request overrides. Logs emit lower_snake_case fields consistent with previous telemetry.
 - **Logging**: Pino logger in `node/src/logging/logger.js`; base level from env `LOG_LEVEL` (default `info`). Effective level is resolved per request from the host config `logLevel` (inherit from `__default__`) and can be overridden via `X-Sideband-Log` (`debug|info|warn|err`). Request loggers carry `host_log_level` when elevated so sideband decisions are visible at debug without changing process-wide level. Logs emit lower_snake_case fields consistent with previous telemetry.
 
@@ -33,6 +33,7 @@ This document is the canonical contract for the Node.js Fastify service that now
 - `SIDEBAND_BEARER` default empty; `SIDEBAND_UA` default `njs-sideband/1.0`; `SIDEBAND_TIMEOUT_MS` default `5000`.
 - `CA_BUNDLE` default `/etc/ssl/certs/ca-certificates.crt`.
 - `HTTP_PORT` default `22080`; `HTTPS_PORT` default `22443`; `MANAGEMENT_PORT` default `22100`; `HTTPS_CERT`/`HTTPS_KEY` default `../certs/sideband-local.crt|key`; HTTPS enabled only if both files exist/read.
+- `DYNAMIC_CERTS_ENABLED` default `false`; when `true` and `MITM_CA_CERT`/`MITM_CA_KEY` point to readable files, the HTTPS listener issues per-host certificates signed by that CA (subject/SAN = requested host). `MITM_CERT_VALIDITY_DAYS` controls leaf lifetime (default 365 days).
 - `FORWARD_PROXY_PORT` default `10000`; `FORWARD_PROXY_ENABLED` defaults to `true` (set to `false` to disable the listener).
 - `CONFIG_STORE_PATH` default `var/guardrails_config.json`.
 - `serviceName` fixed `f5-ai-connector-node` for logs; tests use stub sideband URL override when host `tests.local` is detected.

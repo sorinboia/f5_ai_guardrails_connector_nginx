@@ -21,6 +21,12 @@ function hasFile(filePath) {
   }
 }
 
+function getActiveCaPath(appConfig) {
+  const dynamicCa = appConfig?.https?.dynamicCerts?.caCertPath;
+  if (dynamicCa) return dynamicCa;
+  return appConfig?.https?.certPath || null;
+}
+
 async function staticRoutes(fastify) {
   // Decorate reply with sendFile without auto-registering directory handlers.
   fastify.register(fastifyStatic, {
@@ -60,6 +66,14 @@ async function staticRoutes(fastify) {
     return reply.sendFile(target);
   });
 
+  async function serveActiveCa(request, reply, contentType) {
+    const caPath = getActiveCaPath(fastify.appConfig);
+    if (!caPath || !hasFile(caPath)) {
+      return noStore(reply).code(404).type('text/plain; charset=utf-8').send('not found');
+    }
+    return noStore(reply).type(contentType).send(fs.createReadStream(path.resolve(caPath)));
+  }
+
   async function serveMitmCert(request, reply, filename, contentType) {
     const base = mitmBasePath(request);
     const filePath = path.join(base, filename);
@@ -76,6 +90,10 @@ async function staticRoutes(fastify) {
   fastify.get('/config/mitm/mitmproxy-ca-cert.cer', async (request, reply) =>
     serveMitmCert(request, reply, 'mitmproxy-ca-cert.cer', 'application/pkix-cert')
   );
+
+  // Preferred CA download: serves the configured MITM CA if present, else falls back to the static HTTPS cert.
+  fastify.get('/config/mitm/ca.pem', async (request, reply) => serveActiveCa(request, reply, 'application/x-pem-file'));
+  fastify.get('/config/mitm/ca.cer', async (request, reply) => serveActiveCa(request, reply, 'application/pkix-cert'));
 }
 
 export default fp(staticRoutes);

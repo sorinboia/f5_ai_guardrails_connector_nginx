@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { DynamicCertManager } from '../tls/dynamicCert.js';
 
 const DEFAULT_HTTP_PORT = 22080;
 const DEFAULT_HTTPS_PORT = 22443;
@@ -36,6 +37,10 @@ export function loadConfigFromEnv() {
   const httpsCert = process.env.HTTPS_CERT || DEFAULT_CERT_PATH;
   const httpsKey = process.env.HTTPS_KEY || DEFAULT_KEY_PATH;
   const httpsEnabled = fileExists(httpsCert) && fileExists(httpsKey);
+  const dynamicCertsEnabled = (process.env.DYNAMIC_CERTS_ENABLED || 'false').toLowerCase() === 'true';
+  const mitmCaCert = process.env.MITM_CA_CERT || '';
+  const mitmCaKey = process.env.MITM_CA_KEY || '';
+  const mitmValidityDays = Number(process.env.MITM_CERT_VALIDITY_DAYS || 365);
 
   return {
     backendOrigin,
@@ -50,7 +55,13 @@ export function loadConfigFromEnv() {
       enabled: httpsEnabled,
       port: httpsPort,
       certPath: httpsCert,
-      keyPath: httpsKey
+      keyPath: httpsKey,
+      dynamicCerts: {
+        enabled: dynamicCertsEnabled && Boolean(mitmCaCert) && Boolean(mitmCaKey),
+        caCertPath: mitmCaCert,
+        caKeyPath: mitmCaKey,
+        validityDays: Number.isFinite(mitmValidityDays) && mitmValidityDays > 0 ? mitmValidityDays : 365
+      }
     },
     storePath: process.env.CONFIG_STORE_PATH || DEFAULT_STORE_PATH,
     testsLocalSideband: TESTS_LOCAL_SIDEBAND,
@@ -63,14 +74,39 @@ export function loadConfigFromEnv() {
   };
 }
 
-export function loadTlsOptions(config) {
+export function loadTlsOptions(config, logger) {
   if (!config.https.enabled) return null;
   try {
-    return {
-      key: fs.readFileSync(path.resolve(config.https.keyPath)),
-      cert: fs.readFileSync(path.resolve(config.https.certPath))
-    };
+    const baseKey = fs.readFileSync(path.resolve(config.https.keyPath));
+    const baseCert = fs.readFileSync(path.resolve(config.https.certPath));
+
+    if (config.https.dynamicCerts?.enabled) {
+      try {
+        const manager = new DynamicCertManager({
+          caCertPath: config.https.dynamicCerts.caCertPath,
+          caKeyPath: config.https.dynamicCerts.caKeyPath,
+          defaultCertPath: config.https.certPath,
+          defaultKeyPath: config.https.keyPath,
+          logger,
+          validityDays: config.https.dynamicCerts.validityDays
+        });
+
+        return {
+          key: baseKey,
+          cert: baseCert,
+          SNICallback: (servername, cb) => {
+            const ctx = manager.getContext(servername);
+            cb(null, ctx);
+          }
+        };
+      } catch (err) {
+        logger?.error({ step: 'tls:dynamic_cert_init_failed', err: err?.message || String(err) });
+      }
+    }
+
+    return { key: baseKey, cert: baseCert };
   } catch (err) {
+    logger?.error({ step: 'tls:load_failed', err: err?.message || String(err) });
     return null;
   }
 }

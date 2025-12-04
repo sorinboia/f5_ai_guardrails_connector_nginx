@@ -101,7 +101,7 @@ async function start() {
   await httpApp.listen({ port: config.httpPort, host: '0.0.0.0' });
   logger.info({ port: config.httpPort }, 'HTTP listener started');
 
-  const tlsOptions = loadTlsOptions(config);
+  const tlsOptions = loadTlsOptions(config, logger);
   if (tlsOptions) {
     const httpsApp = buildApp(config, logger, store, tlsOptions, {
       enableProxy: true,
