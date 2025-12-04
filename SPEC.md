@@ -4,10 +4,10 @@ This document is the canonical contract for the Node.js Fastify service that now
 
 ---
 ## 1) Runtime Topology
-- **Entrypoint**: `node/src/server.js` starts Fastify on HTTP port `11434` and (when cert/key exist) HTTPS port `11443`. TLS assets default to `/etc/nginx/certs/sideband-local.crt|key` so existing cert mounts keep working.
+- **Entrypoint**: `node/src/server.js` starts two Fastify instances: management/UI on HTTP port `22100` and the data plane proxy on HTTP `22080` plus (when cert/key exist) HTTPS `22443`. TLS assets default to `/etc/nginx/certs/sideband-local.crt|key` so existing cert mounts keep working.
 - **Static assets**: Served from `/etc/nginx/html` by `node/src/routes/static.js` (`scanner-config.html` + `/config/css|js/*`).
 - **Config & state**: Persisted JSON file at `var/guardrails_config.json` (path overrideable via `CONFIG_STORE_PATH`). `server.js` watches the file for hot reload and mutates the in-memory store in place so route decorators stay valid.
-- **MITM sidecar**: Container runs `mitmdump` with addon `mitmproxy.py`; listens on `0.0.0.0:10000`. CA files are written to `/var/lib/mitmproxy/` (HTTP) or `/root/.mitmproxy/` (when TLS terminates upstream) and downloaded via `/config/mitm/mitmproxy-ca-cert.(pem|cer)`.
+- **Forward proxy**: Node-owned listener on `0.0.0.0:10000` handles HTTP absolute-form requests and `CONNECT` tunnels. Destinations must already exist as hosts in the config store; unlisted hosts are rejected with `403`. Allowed targets are relayed to the local data-plane listeners (`http 22080` or `https 22443`, depending on the requested scheme) so the standard inspection pipeline runs.
 - **Logging**: Pino logger in `node/src/logging/logger.js`; log level from env `LOG_LEVEL` (default `info`) or per-request overrides. Logs emit lower_snake_case fields consistent with previous telemetry.
 - **Logging**: Pino logger in `node/src/logging/logger.js`; base level from env `LOG_LEVEL` (default `info`). Effective level is resolved per request from the host config `logLevel` (inherit from `__default__`) and can be overridden via `X-Sideband-Log` (`debug|info|warn|err`). Request loggers carry `host_log_level` when elevated so sideband decisions are visible at debug without changing process-wide level. Logs emit lower_snake_case fields consistent with previous telemetry.
 
@@ -15,10 +15,16 @@ This document is the canonical contract for the Node.js Fastify service that now
 ## 2) External Interface (Ports & Routes)
 - **Proxy catch‑all**: `/*` handled by `node/src/pipeline/proxyPipeline.js` via `node/src/routes/proxy.js`.
 - **Bypass path**: `/api/tags` proxied directly to resolved backend origin without inspection.
-- **Static/UI**: `/config/ui`, `/config/ui/keys`, `/config/ui/patterns` → `scanner-config.html`; `/config/ui/*` redirects strip trailing slash; `/collector/ui` redirects to `/config/ui`. `/config/css/*` and `/config/js/*` serve assets with `cache-control: no-store`.
-- **Management APIs**: `/config/api`, `/config/api/keys`, `/config/api/patterns`, `/collector/api` implemented in `node/src/routes/management.js` with helpers in `node/src/config/validate.js` and `node/src/config/store.js`.
-- **MITM CA downloads**: `/config/mitm/mitmproxy-ca-cert.pem` (`application/x-pem-file`) and `.cer` (`application/pkix-cert`), `cache-control: no-store`, 404 if file missing.
-- **Ports**: HTTP `11434`; HTTPS `11443` (optional); MITM `10000`.
+- **Static/UI**: `/config/ui`, `/config/ui/keys`, `/config/ui/patterns` → `scanner-config.html`; `/config/ui/*` redirects strip trailing slash; `/collector/ui` redirects to `/config/ui`. `/config/css/*` and `/config/js/*` serve assets with `cache-control: no-store`. Served only from the management listener.
+- **Management APIs**: `/config/api`, `/config/api/keys`, `/config/api/patterns`, `/collector/api` implemented in `node/src/routes/management.js` with helpers in `node/src/config/validate.js` and `node/src/config/store.js`. Exposed only on the management listener.
+- **Forward proxy listener**: HTTP/1.1 listener on `10000` accepts forward-proxy traffic and relays to local data-plane ports after allowlist validation.
+- **Ports**: Management/UI HTTP `22100`; data plane HTTP `22080`; data plane HTTPS `22443` (optional); forward proxy `10000`.
+
+### 2a) Forward Proxy Behaviour
+- Accepts absolute-form HTTP requests and `CONNECT host:port` tunnels on port `10000`.
+- Before tunnelling/forwarding, resolves the destination host (case-insensitive) and verifies it exists in the config store `hosts`/`hostConfigs`. Missing hosts → `403` with `forward_proxy_rejected`.
+- Allowed HTTPS targets are TCP-tunnelled to the local HTTPS listener (`127.0.0.1:22443` by default); HTTP targets are proxied to `127.0.0.1:22080`. Requests keep the original `Host` header so the inspection pipeline resolves the correct host config and backend origin.
+- If HTTPS is disabled (no cert/key), HTTPS CONNECTs are rejected with `503` and a plain-text error.
 
 ---
 ## 3) Environment & Defaults (`node/src/config/env.js`)
@@ -26,7 +32,8 @@ This document is the canonical contract for the Node.js Fastify service that now
 - `SIDEBAND_URL` default `https://www.us1.calypsoai.app/backend/v1/scans`.
 - `SIDEBAND_BEARER` default empty; `SIDEBAND_UA` default `njs-sideband/1.0`; `SIDEBAND_TIMEOUT_MS` default `5000`.
 - `CA_BUNDLE` default `/etc/ssl/certs/ca-certificates.crt`.
-- `HTTP_PORT` default `11434`; `HTTPS_PORT` default `443`; `HTTPS_CERT`/`HTTPS_KEY` default `/etc/nginx/certs/sideband-local.crt|key`; HTTPS enabled only if both files exist/read.
+- `HTTP_PORT` default `22080`; `HTTPS_PORT` default `22443`; `MANAGEMENT_PORT` default `22100`; `HTTPS_CERT`/`HTTPS_KEY` default `/etc/nginx/certs/sideband-local.crt|key`; HTTPS enabled only if both files exist/read.
+- `FORWARD_PROXY_PORT` default `10000`; `FORWARD_PROXY_ENABLED` defaults to `true` (set to `false` to disable the listener).
 - `CONFIG_STORE_PATH` default `var/guardrails_config.json`.
 - `serviceName` fixed `f5-ai-connector-node` for logs; tests use stub sideband URL override when host `tests.local` is detected.
 
@@ -116,10 +123,10 @@ Common: all responses `cache-control: no-store`; CORS allows `content-type` only
 
 ---
 ## 11) Operational Commands
-- **Dev**: `cd node && npm run dev` (HTTP 11434, HTTPS 443 if cert/key exist).
-- **Prod**: `HTTP_PORT=11434 HTTPS_PORT=11443 node src/server.js` (set env for origins/bearer/paths as needed).
+- **Dev**: `cd node && npm run dev` (HTTP 22080, HTTPS 22443 if cert/key exist).
+- **Prod**: `HTTP_PORT=22080 HTTPS_PORT=22443 MANAGEMENT_PORT=22100 node src/server.js` (set env for origins/bearer/paths as needed).
 - **Tests**: `cd node && npm test` (Vitest). Smoke: `tests/smoke/node-shadow.sh`.
-- **Docker**: build with `docker build -t sorinboiaf5/f5-ai-connector:latest .`; run with `-p 11434:11434 [-p 11443:11443] [-p 10000:10000]` plus relevant env vars.
+- **Docker**: build with `docker build -t sorinboiaf5/f5-ai-connector:latest .`; run with `-p 22080:22080 [-p 22443:22443] -p 22100:22100 [-p 10000:10000]` plus relevant env vars.
 
 ---
 ## 12) Behavioural Invariants
@@ -128,11 +135,12 @@ Common: all responses `cache-control: no-store`; CORS allows `content-type` only
 - When `responseStreamBufferingMode=passthrough`, response-side blocking is enforced by closing the client socket (bytes may already have streamed when the drop occurs).
 - Guardrails outcomes: `flagged` or `redacted` without applied matches → block with blockingResponse; `redacted` with applied matches → masked body forwarded; `cleared` → passthrough.
 - Collector cap is 50 entries; `remaining` decrements atomically per capture attempt.
-- MITM CA endpoints return 404 until files exist; always served with `cache-control: no-store`.
+- Forward proxy only permits destinations that already exist in the config store; missing hosts return HTTP 403 to the proxy client.
 
 ---
 ## 13) File Inventory (authoritative sources)
 - `node/src/server.js` — process bootstrap + HTTP/HTTPS listeners + store watcher.
+- `node/src/forwardProxy.js` — forward-proxy listener (HTTP absolute + CONNECT) forwarding into local data-plane ports after allowlist validation.
 - `node/src/routes/static.js` — UI + MITM downloads.
 - `node/src/routes/management.js` — management API handlers.
 - `node/src/routes/proxy.js` — `/api/tags` bypass + catch‑all pipeline registration.
@@ -142,5 +150,5 @@ Common: all responses `cache-control: no-store`; CORS allows `content-type` only
 - `node/var/guardrails_config.json` — default persisted store (mutable at runtime).
 - `html/` — UI bundle served by static routes.
 - `certs/` — sample/self-signed certs for optional HTTPS listener.
-- `mitmproxy.py` — mitmdump addon for optional MITM sidecar.
-- `Dockerfile` — Node-only runtime image; starts mitmdump + Node server.
+- `mitmproxy.py` — legacy addon (no longer launched).
+- `Dockerfile` — Node-only runtime image; starts Fastify + forward proxy in-process.

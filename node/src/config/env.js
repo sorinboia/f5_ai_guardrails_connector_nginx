@@ -1,8 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 
-const DEFAULT_HTTP_PORT = 11434;
-const DEFAULT_HTTPS_PORT = 443;
+const DEFAULT_HTTP_PORT = 22080;
+const DEFAULT_HTTPS_PORT = 22443;
+const DEFAULT_MANAGEMENT_PORT = 22100;
+const DEFAULT_FORWARD_PROXY_PORT = 10000;
 const DEFAULT_CERT_PATH = '/etc/nginx/certs/sideband-local.crt';
 const DEFAULT_KEY_PATH = '/etc/nginx/certs/sideband-local.key';
 const DEFAULT_BACKEND_ORIGIN = 'https://api.openai.com';
@@ -28,6 +30,9 @@ export function loadConfigFromEnv() {
   const logLevel = process.env.LOG_LEVEL || 'info';
   const httpPort = Number(process.env.HTTP_PORT || DEFAULT_HTTP_PORT);
   const httpsPort = Number(process.env.HTTPS_PORT || DEFAULT_HTTPS_PORT);
+  const managementPort = Number(process.env.MANAGEMENT_PORT || DEFAULT_MANAGEMENT_PORT);
+  const forwardProxyPort = Number(process.env.FORWARD_PROXY_PORT || DEFAULT_FORWARD_PROXY_PORT);
+  const forwardProxyEnabled = (process.env.FORWARD_PROXY_ENABLED || 'true').toLowerCase() !== 'false';
   const httpsCert = process.env.HTTPS_CERT || DEFAULT_CERT_PATH;
   const httpsKey = process.env.HTTPS_KEY || DEFAULT_KEY_PATH;
   const httpsEnabled = fileExists(httpsCert) && fileExists(httpsKey);
@@ -49,6 +54,11 @@ export function loadConfigFromEnv() {
     },
     storePath: process.env.CONFIG_STORE_PATH || DEFAULT_STORE_PATH,
     testsLocalSideband: TESTS_LOCAL_SIDEBAND,
+    managementPort,
+    forwardProxy: {
+      enabled: forwardProxyEnabled,
+      port: forwardProxyPort
+    },
     serviceName: 'f5-ai-connector-node'
   };
 }

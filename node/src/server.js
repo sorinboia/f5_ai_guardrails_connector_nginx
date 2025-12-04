@@ -5,6 +5,7 @@ import routes from './routes/index.js';
 import { loadConfigFromEnv, loadTlsOptions } from './config/env.js';
 import { createLogger } from './logging/logger.js';
 import { loadStore, saveStore } from './config/store.js';
+import { startForwardProxy } from './forwardProxy.js';
 
 function applyStoreUpdate(target, next) {
   // Mutate the existing store object so Fastify decorators keep references.
@@ -54,7 +55,7 @@ function watchStore(store, logger, storePath) {
   }
 }
 
-function buildApp(config, logger, store, tlsOptions = null) {
+function buildApp(config, logger, store, tlsOptions = null, routeOptions = {}) {
   const app = Fastify({
     logger,
     trustProxy: true,
@@ -67,6 +68,7 @@ function buildApp(config, logger, store, tlsOptions = null) {
 
   app.register(routes, {
     backendOrigin: config.backendOrigin,
+    ...routeOptions
   });
 
   app.setNotFoundHandler((request, reply) => {
@@ -83,17 +85,36 @@ async function start() {
   const store = loadStore(logger, config.storePath);
   watchStore(store, logger, config.storePath);
 
-  const httpApp = buildApp(config, logger, store);
+  const managementApp = buildApp(config, logger, store, null, {
+    enableProxy: false,
+    enableStatic: true,
+    enableManagement: true
+  });
+  await managementApp.listen({ port: config.managementPort, host: '0.0.0.0' });
+  logger.info({ port: config.managementPort }, 'Management listener started');
+
+  const httpApp = buildApp(config, logger, store, null, {
+    enableProxy: true,
+    enableStatic: false,
+    enableManagement: false
+  });
   await httpApp.listen({ port: config.httpPort, host: '0.0.0.0' });
   logger.info({ port: config.httpPort }, 'HTTP listener started');
 
   const tlsOptions = loadTlsOptions(config);
   if (tlsOptions) {
-    const httpsApp = buildApp(config, logger, store, tlsOptions);
+    const httpsApp = buildApp(config, logger, store, tlsOptions, {
+      enableProxy: true,
+      enableStatic: false,
+      enableManagement: false
+    });
     await httpsApp.listen({ port: config.https.port, host: '0.0.0.0' });
     logger.info({ port: config.https.port }, 'HTTPS listener started');
+
+    startForwardProxy(config, store, logger);
   } else {
     logger.warn('HTTPS listener skipped (cert/key not found or unreadable)');
+    startForwardProxy(config, store, logger);
   }
 }
 
