@@ -1,4 +1,6 @@
 import fs from 'fs';
+import { PassThrough, Readable } from 'stream';
+import { finished } from 'stream/promises';
 import undici from 'undici';
 import { resolveConfig } from '../config/validate.js';
 import { defaultStore } from '../config/store.js';
@@ -355,6 +357,78 @@ async function fetchBackend(url, request, bodyText, upstreamHost, caBundle) {
   };
 }
 
+async function streamBackendPassthrough(url, request, bodyText, upstreamHost, caBundle, reply, inspectChunk) {
+  const headers = filterRequestHeaders(request.headers, upstreamHost);
+  const method = request.method || 'GET';
+  const dispatcher = getBackendDispatcher(caBundle, request.log);
+  const res = await undiciRequest(url, {
+    method,
+    headers,
+    body: bodyText && ['GET', 'HEAD'].includes(method) ? undefined : bodyText,
+    dispatcher
+  });
+
+  const responseHeaders = cloneHeaders(res.headers);
+  for (const [key, value] of Object.entries(responseHeaders || {})) {
+    if (['content-length', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) continue;
+    reply.header(key, value);
+  }
+  reply.code(res.statusCode);
+
+  const source = Readable.from(res.body);
+  const tee = new PassThrough();
+  let responseBody = '';
+  let blocked = false;
+  let inspecting = false;
+
+  tee.on('data', (chunk) => {
+    responseBody += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    if (inspectChunk && !blocked && !inspecting) {
+      inspecting = true;
+      inspectChunk(responseBody)
+        .then((result) => {
+          inspecting = false;
+          if (result?.blocked && !blocked) {
+            blocked = true;
+            request.log.warn({ step: 'stream:passthrough_drop', reason: 'live_chunk_blocked', api_key_name: result.apiKeyName, pattern_id: result.patternId, details: result.details || {} });
+            if (!reply.raw.destroyed) reply.raw.destroy(new Error('response_stream_blocked'));
+            source.destroy(new Error('response_stream_blocked'));
+            tee.destroy(new Error('response_stream_blocked'));
+          }
+        })
+        .catch((err) => {
+          inspecting = false;
+          request.log.error({ step: 'stream:inspect_error', error: err?.message || String(err) });
+        });
+    }
+  });
+
+  source.on('error', (err) => {
+    request.log.error({ step: 'stream:upstream_error', error: err?.message || String(err) });
+    tee.destroy(err);
+  });
+  tee.on('error', (err) => {
+    request.log.error({ step: 'stream:passthrough_error', error: err?.message || String(err) });
+    reply.raw.destroy(err);
+  });
+
+  source.pipe(tee);
+  reply.send(tee);
+
+  try {
+    await finished(tee);
+  } catch (err) {
+    request.log.error({ step: 'stream:passthrough_finish_error', error: err?.message || String(err) });
+  }
+
+  return {
+    status: res.statusCode,
+    headers: responseHeaders,
+    body: responseBody,
+    streamed: true
+  };
+}
+
 function startBackendRequest(url, request, bodyText, upstreamHost, caBundle) {
   const controller = new AbortController();
   const headers = filterRequestHeaders(request.headers, upstreamHost);
@@ -407,6 +481,20 @@ export function buildProxyHandler(fastify) {
     }
     const responseStreamFinalEnabled = config.responseStreamFinalEnabled !== undefined ? !!config.responseStreamFinalEnabled : true;
     const responseStreamCollectFullEnabled = !!config.responseStreamCollectFullEnabled;
+    const responseStreamBufferingMode = normalizeEnum(
+      config.responseStreamBufferingMode,
+      ['buffer', 'passthrough'],
+      'buffer',
+      { passthru: 'passthrough' }
+    );
+    const responseStreamPassthrough = responseStreamEnabled && responseStreamBufferingMode === 'passthrough';
+    const responseStreamBlockingAllowed = !responseStreamPassthrough;
+
+    const dropPassthroughStream = (meta = {}) => {
+      // Socket-level drop to enforce blocks when we've already streamed bytes to the client.
+      request.log.warn({ step: 'stream:passthrough_drop', ...meta });
+      if (!reply.raw.destroyed) reply.raw.destroy(new Error('response_stream_blocked'));
+    };
 
     const extractorParallelEnabled = !!(config.extractorParallelEnabled ?? config.extractorParallel);
 
@@ -446,7 +534,11 @@ export function buildProxyHandler(fastify) {
       redactResponseEnabled = false;
     }
 
-    const parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled;
+    if (responseStreamPassthrough && wantParallel) {
+      request.log.info({ step: 'forward_mode:passthrough_forces_sequential' });
+    }
+
+    const parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled && !responseStreamPassthrough;
 
     const upstreamUrl = new URL(request.raw.url || request.url || '/', config.backendOrigin || appCfg.backendOrigin);
     const upstreamHost = upstreamUrl.host;
@@ -506,9 +598,50 @@ export function buildProxyHandler(fastify) {
         }
       }
 
-      const backend = backendPromise
-        ? await backendPromise
-        : await fetchBackend(upstreamUrl.toString(), request, reqBodyText, upstreamHost, appCfg.caBundle);
+      let liveInspectChunk = null;
+      if (responseStreamPassthrough && inspectResponseEnabled && responsePatterns.length) {
+        let lastEvents = 0;
+        liveInspectChunk = async (bodySoFar) => {
+          const parsed = parseStreamingBody(bodySoFar);
+          if (!parsed.events || parsed.events === lastEvents) return { blocked: false };
+          lastEvents = parsed.events;
+          const liveResult = await processInspectionStage({
+            phase: 'response_stream',
+            body: buildStreamMessageBody(parsed.assembled),
+            fallbackPaths: [],
+            patternsList: responsePatterns,
+            inspectEnabled: true,
+            redactEnabled: false,
+            parallelExtractors: false,
+            sideband,
+            apiKeys: store.apiKeys,
+            log: request.log
+          });
+          if (liveResult.status === 'blocked') {
+            return {
+              blocked: true,
+              apiKeyName: liveResult.apiKeyName,
+              patternId: liveResult.patternId,
+              details: liveResult.details
+            };
+          }
+          return { blocked: false };
+        };
+      }
+
+      const backend = responseStreamPassthrough
+        ? await streamBackendPassthrough(
+            upstreamUrl.toString(),
+            request,
+            reqBodyText,
+            upstreamHost,
+            appCfg.caBundle,
+            reply,
+            liveInspectChunk
+          )
+        : backendPromise
+          ? await backendPromise
+          : await fetchBackend(upstreamUrl.toString(), request, reqBodyText, upstreamHost, appCfg.caBundle);
 
       const respBodyRaw = typeof backend.body === 'string' ? backend.body : (backend.body ? String(backend.body) : '');
       backend.body = respBodyRaw;
@@ -563,16 +696,24 @@ export function buildProxyHandler(fastify) {
             log: request.log
           });
           if (fullResult.status === 'blocked') {
-            const block = blockingResponseForKey(store, fullResult.apiKeyName);
-            reply.code(block.status || 200).header('content-type', block.contentType || 'application/json; charset=utf-8');
-            return reply.send(block.body || '');
+            if (responseStreamBlockingAllowed) {
+              const block = blockingResponseForKey(store, fullResult.apiKeyName);
+              reply.code(block.status || 200).header('content-type', block.contentType || 'application/json; charset=utf-8');
+              return reply.send(block.body || '');
+            }
+            dropPassthroughStream({ api_key_name: fullResult.apiKeyName, pattern_id: fullResult.patternId, reason: 'full_stream_blocked' });
+            return;
           }
         } else {
           const streamResult = await inspectStreamChunks(streamParsed.assembled);
           if (streamResult.status === 'blocked') {
-            const block = blockingResponseForKey(store, streamResult.apiKeyName);
-            reply.code(block.status || 200).header('content-type', block.contentType || 'application/json; charset=utf-8');
-            return reply.send(block.body || '');
+            if (responseStreamBlockingAllowed) {
+              const block = blockingResponseForKey(store, streamResult.apiKeyName);
+              reply.code(block.status || 200).header('content-type', block.contentType || 'application/json; charset=utf-8');
+              return reply.send(block.body || '');
+            }
+            dropPassthroughStream({ api_key_name: streamResult.apiKeyName, pattern_id: streamResult.patternId, reason: 'stream_chunk_blocked', details: streamResult.details });
+            return;
           }
         }
       }
@@ -593,9 +734,13 @@ export function buildProxyHandler(fastify) {
         });
 
         if (responseResult.status === 'blocked') {
-          const block = blockingResponseForKey(store, responseResult.apiKeyName);
-          reply.code(block.status || 200).header('content-type', block.contentType || 'application/json; charset=utf-8');
-          return reply.send(block.body || '');
+          if (responseStreamBlockingAllowed) {
+            const block = blockingResponseForKey(store, responseResult.apiKeyName);
+            reply.code(block.status || 200).header('content-type', block.contentType || 'application/json; charset=utf-8');
+            return reply.send(block.body || '');
+          }
+          dropPassthroughStream({ api_key_name: responseResult.apiKeyName, pattern_id: responseResult.patternId, reason: 'final_stream_blocked' });
+          return;
         }
         if (responseResult.body !== undefined && !responseStreamEnabled) {
           backend.body = responseResult.body;
@@ -608,13 +753,16 @@ export function buildProxyHandler(fastify) {
         fastify.saveStore(store);
       }
 
-      for (const [key, value] of Object.entries(backend.headers || {})) {
-        if (['content-length', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) continue;
-        reply.header(key, value);
+      if (!responseStreamPassthrough) {
+        for (const [key, value] of Object.entries(backend.headers || {})) {
+          if (['content-length', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) continue;
+          reply.header(key, value);
+        }
+        reply.code(backend.status);
+        reply.header('content-length', Buffer.byteLength(backend.body || '', 'utf8'));
+        return reply.send(backend.body || '');
       }
-      reply.code(backend.status);
-      reply.header('content-length', Buffer.byteLength(backend.body || '', 'utf8'));
-      return reply.send(backend.body || '');
+      return; // response already streamed to client
     } catch (err) {
       request.log.error({ step: 'proxy:error', error: err?.message || String(err) });
       // Fail open: try to proxy raw request without inspection
