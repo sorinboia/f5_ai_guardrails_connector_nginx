@@ -111,7 +111,8 @@
       responseStreamChunkOverlap: Number(cfg && cfg.responseStreamChunkOverlap) || 0,
       responseStreamFinalEnabled: !!(cfg && cfg.responseStreamFinalEnabled),
       responseStreamCollectFullEnabled: !!(cfg && cfg.responseStreamCollectFullEnabled),
-      responseStreamBufferingMode: (cfg && cfg.responseStreamBufferingMode) || 'buffer'
+      responseStreamBufferingMode: (cfg && cfg.responseStreamBufferingMode) || 'buffer',
+      responseStreamChunkGatingEnabled: !!(cfg && cfg.responseStreamChunkGatingEnabled)
     });
 
     const isDirty = useMemo(() => {
@@ -347,7 +348,8 @@
         responseStreamChunkOverlap: defaults.responseStreamChunkOverlap,
         responseStreamFinalEnabled: !!defaults.responseStreamFinalEnabled,
         responseStreamCollectFullEnabled: !!defaults.responseStreamCollectFullEnabled,
-        responseStreamBufferingMode: (defaults && defaults.responseStreamBufferingMode) || 'buffer'
+        responseStreamBufferingMode: (defaults && defaults.responseStreamBufferingMode) || 'buffer',
+        responseStreamChunkGatingEnabled: !!defaults.responseStreamChunkGatingEnabled
       });
       const message = `Defaults staged for ${hostDisplayLabel(selectedHost)}. Save to persist.`;
       setStatus({ tone: 'info', message });
@@ -413,7 +415,8 @@
         responseStreamChunkOverlap,
         responseStreamFinalEnabled: !!config.responseStreamFinalEnabled,
         responseStreamCollectFullEnabled: !!config.responseStreamCollectFullEnabled,
-        responseStreamBufferingMode: config.responseStreamBufferingMode || 'buffer'
+        responseStreamBufferingMode: config.responseStreamBufferingMode || 'buffer',
+        responseStreamChunkGatingEnabled: !!config.responseStreamChunkGatingEnabled
       };
       try {
         const response = await fetch('/config/api', {
@@ -784,6 +787,22 @@
                 value={config.responseStreamBufferingMode || 'buffer'}
                 onChange={value => setConfig(prev => ({ ...prev, responseStreamBufferingMode: value }))}
               />
+
+              <label className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${config.responseStreamBufferingMode === 'passthrough' ? 'border-slate-200 bg-slate-50/70 text-slate-700' : 'border-slate-100 bg-slate-50 text-slate-400'}`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                  checked={!!config.responseStreamChunkGatingEnabled}
+                  disabled={config.responseStreamBufferingMode !== 'passthrough'}
+                  onChange={event => setConfig(prev => ({ ...prev, responseStreamChunkGatingEnabled: event.target.checked }))}
+                />
+                <span>
+                  Gate each streamed chunk until its scan verdict
+                  <span className="block text-xs text-slate-500">
+                    Holds SSE/chunk bytes until live inspection clears them. Only applies when delivery mode is passthrough.
+                  </span>
+                </span>
+              </label>
             </SectionCard>
 
             <SectionCard

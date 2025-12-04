@@ -61,7 +61,7 @@ JSON file schema:
 - **Defaults**:
   - `inspectMode=both`, `redactMode=both`, `logLevel=info`, `requestForwardMode=sequential`, `backendOrigin=env BACKEND_ORIGIN`.
   - `requestExtractors=[]`, `responseExtractors=[]`, `extractorParallel=false`.
-  - Streaming: `responseStreamEnabled=true`, `responseStreamChunkSize=2048`, `responseStreamChunkOverlap=128`, `responseStreamFinalEnabled=true`, `responseStreamCollectFullEnabled=false`, `responseStreamBufferingMode=buffer`.
+  - Streaming: `responseStreamEnabled=true`, `responseStreamChunkSize=2048`, `responseStreamChunkOverlap=128`, `responseStreamFinalEnabled=true`, `responseStreamCollectFullEnabled=false`, `responseStreamBufferingMode=buffer`, `responseStreamChunkGatingEnabled=false`.
 - **Enums/validation**: `inspect|redactMode ∈ off|request|response|both`; `logLevel ∈ debug|info|warn|err`; `requestForwardMode ∈ sequential|parallel`; `backendOrigin` must be http(s). Pattern/context enums match §7.
 - **Header overrides**: `X-Sideband-Inspect`, `X-Sideband-Redact`, `X-Sideband-Log`, `X-Sideband-Forward`; invalid values are ignored (fall back to config).
 - **Parallel safety**: parallel forward is disabled when request redaction is on; redaction never applied to streaming responses.
@@ -90,7 +90,7 @@ JSON file schema:
    - Streaming detection via `pipeline/streaming.js` (SSE `data:` frames or `text/event-stream`).
    - Buffering mode (`responseStreamBufferingMode`):
      - `buffer` (default) — full upstream body is buffered before any bytes are sent; blocking responses can still be emitted on streamed content.
-    - `passthrough` — upstream bytes are chunked through to the client as they arrive while the connector concurrently tees the stream for inspection/logging; on a block the connector forcibly drops the client connection (bytes already sent may be partial); redaction remains disabled.
+      - `passthrough` — upstream bytes are chunked through to the client as they arrive while the connector concurrently tees the stream for inspection/logging; on a block the connector forcibly drops the client connection (bytes already sent may be partial); redaction remains disabled. When `responseStreamChunkGatingEnabled=true`, each chunk is held until the live inspection verdict returns; a block closes the client socket before that chunk is forwarded.
    - For inspection, text is assembled from SSE deltas and sliced into overlapping chunks (default 2048/128) for `response_stream` evaluation. Final inspection on assembled text is optional via `responseStreamFinalEnabled`.
    - Non-stream responses: optional inspection/redaction on full body when enabled; response patterns evaluated similar to request stage.
 6. **Collector** (`pipeline/collector.js`): stores `{ requestBody, responseBody }` while `remaining > 0`, decrementing per capture; cap 50 entries; persisted to store file.
@@ -133,7 +133,7 @@ Common: all responses `cache-control: no-store`; CORS allows `content-type` only
 ## 12) Behavioural Invariants
 - `__default__` host cannot be removed; host resolution order is deterministic (§5).
 - Parallel forwarding is automatically disabled when request redaction is enabled; streaming responses are never mutated.
-- When `responseStreamBufferingMode=passthrough`, response-side blocking is enforced by closing the client socket (bytes may already have streamed when the drop occurs).
+- When `responseStreamBufferingMode=passthrough`, response-side blocking is enforced by closing the client socket; when `responseStreamChunkGatingEnabled=true` the connector waits for a chunk verdict before sending it so drops occur before the offending chunk leaves.
 - Guardrails outcomes: `flagged` or `redacted` without applied matches → block with blockingResponse; `redacted` with applied matches → masked body forwarded; `cleared` → passthrough.
 - Collector cap is 50 entries; `remaining` decrements atomically per capture attempt.
 - Forward proxy only permits destinations that already exist in the config store; missing hosts return HTTP 403 to the proxy client.

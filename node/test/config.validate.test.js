@@ -24,6 +24,7 @@ describe('validateConfigPatch', () => {
       responseStreamEnabled: 'false',
       responseStreamFinalEnabled: 1,
       responseStreamCollectFullEnabled: 'yes',
+      responseStreamChunkGatingEnabled: 'true',
       responseStreamChunkSize: 4096,
       responseStreamChunkOverlap: 128,
     };
@@ -43,6 +44,7 @@ describe('validateConfigPatch', () => {
       responseStreamEnabled: false,
       responseStreamFinalEnabled: true,
       responseStreamCollectFullEnabled: true,
+      responseStreamChunkGatingEnabled: true,
       responseStreamChunkSize: 4096,
       responseStreamChunkOverlap: 128,
     });

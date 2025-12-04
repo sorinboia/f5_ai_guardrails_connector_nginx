@@ -78,7 +78,8 @@
       responseStreamChunkOverlap: toNumber(raw.responseStreamChunkOverlap, raw.responseStreamChunkOverlap === 0 ? 0 : undefined),
       responseStreamFinalEnabled: !!raw.responseStreamFinalEnabled,
       responseStreamCollectFullEnabled: !!raw.responseStreamCollectFullEnabled,
-      responseStreamBufferingMode: raw.responseStreamBufferingMode || 'buffer'
+      responseStreamBufferingMode: raw.responseStreamBufferingMode || 'buffer',
+      responseStreamChunkGatingEnabled: !!raw.responseStreamChunkGatingEnabled
     };
   }
 

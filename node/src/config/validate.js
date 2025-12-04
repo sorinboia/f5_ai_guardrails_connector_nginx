@@ -119,6 +119,12 @@ export function validateConfigPatch(patch = {}) {
     else updates.responseStreamCollectFullEnabled = val;
   }
 
+  if (patch.responseStreamChunkGatingEnabled !== undefined) {
+    const val = coerceBoolean(patch.responseStreamChunkGatingEnabled);
+    if (val === undefined) errors.push('responseStreamChunkGatingEnabled must be boolean');
+    else updates.responseStreamChunkGatingEnabled = val;
+  }
+
   if (patch.responseStreamChunkSize !== undefined) {
     const val = coerceInteger(patch.responseStreamChunkSize);
     if (val === undefined || val < 128 || val > 65536) errors.push('responseStreamChunkSize must be between 128 and 65536');

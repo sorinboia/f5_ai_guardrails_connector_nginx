@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { PassThrough, Readable } from 'stream';
+import { once } from 'events';
 import { finished } from 'stream/promises';
 import undici from 'undici';
 import { resolveConfig } from '../config/validate.js';
@@ -357,7 +358,8 @@ async function fetchBackend(url, request, bodyText, upstreamHost, caBundle) {
   };
 }
 
-async function streamBackendPassthrough(url, request, bodyText, upstreamHost, caBundle, reply, inspectChunk) {
+async function streamBackendPassthrough(url, request, bodyText, upstreamHost, caBundle, reply, inspectChunk, options = {}) {
+  const gateChunks = !!options.gateChunks && typeof inspectChunk === 'function';
   const headers = filterRequestHeaders(request.headers, upstreamHost);
   const method = request.method || 'GET';
   const dispatcher = getBackendDispatcher(caBundle, request.log);
@@ -381,27 +383,12 @@ async function streamBackendPassthrough(url, request, bodyText, upstreamHost, ca
   let blocked = false;
   let inspecting = false;
 
-  tee.on('data', (chunk) => {
-    responseBody += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-    if (inspectChunk && !blocked && !inspecting) {
-      inspecting = true;
-      inspectChunk(responseBody)
-        .then((result) => {
-          inspecting = false;
-          if (result?.blocked && !blocked) {
-            blocked = true;
-            request.log.warn({ step: 'stream:passthrough_drop', reason: 'live_chunk_blocked', api_key_name: result.apiKeyName, pattern_id: result.patternId, details: result.details || {} });
-            if (!reply.raw.destroyed) reply.raw.destroy(new Error('response_stream_blocked'));
-            source.destroy(new Error('response_stream_blocked'));
-            tee.destroy(new Error('response_stream_blocked'));
-          }
-        })
-        .catch((err) => {
-          inspecting = false;
-          request.log.error({ step: 'stream:inspect_error', error: err?.message || String(err) });
-        });
-    }
-  });
+  const destroyStreams = (err) => {
+    const reason = err || new Error('response_stream_blocked');
+    if (!reply.raw.destroyed) reply.raw.destroy(reason);
+    source.destroy(reason);
+    tee.destroy(reason);
+  };
 
   source.on('error', (err) => {
     request.log.error({ step: 'stream:upstream_error', error: err?.message || String(err) });
@@ -412,13 +399,77 @@ async function streamBackendPassthrough(url, request, bodyText, upstreamHost, ca
     reply.raw.destroy(err);
   });
 
-  source.pipe(tee);
-  reply.send(tee);
+  if (gateChunks) {
+    reply.send(tee);
+    try {
+      for await (const chunk of source) {
+        const chunkBuf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        const chunkText = chunkBuf.toString('utf8');
+        responseBody += chunkText;
 
-  try {
-    await finished(tee);
-  } catch (err) {
-    request.log.error({ step: 'stream:passthrough_finish_error', error: err?.message || String(err) });
+        if (inspectChunk && !blocked && !inspecting) {
+          inspecting = true;
+          try {
+            const result = await inspectChunk(responseBody);
+            inspecting = false;
+            if (result?.blocked && !blocked) {
+              blocked = true;
+              request.log.warn({ step: 'stream:passthrough_drop', reason: 'live_chunk_blocked', api_key_name: result.apiKeyName, pattern_id: result.patternId, details: result.details || {} });
+              destroyStreams(new Error('response_stream_blocked'));
+              break;
+            }
+          } catch (err) {
+            inspecting = false;
+            request.log.error({ step: 'stream:inspect_error', error: err?.message || String(err) });
+          }
+        }
+
+        if (blocked) break;
+
+        if (!tee.destroyed) {
+          const wrote = tee.write(chunkBuf);
+          if (!wrote) await once(tee, 'drain');
+        }
+      }
+    } catch (err) {
+      request.log.error({ step: 'stream:passthrough_finish_error', error: err?.message || String(err) });
+    } finally {
+      if (!blocked && !tee.destroyed) tee.end();
+    }
+    try {
+      await finished(tee);
+    } catch (err) {
+      request.log.error({ step: 'stream:passthrough_finish_error', error: err?.message || String(err) });
+    }
+  } else {
+    tee.on('data', (chunk) => {
+      responseBody += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      if (inspectChunk && !blocked && !inspecting) {
+        inspecting = true;
+        inspectChunk(responseBody)
+          .then((result) => {
+            inspecting = false;
+            if (result?.blocked && !blocked) {
+              blocked = true;
+              request.log.warn({ step: 'stream:passthrough_drop', reason: 'live_chunk_blocked', api_key_name: result.apiKeyName, pattern_id: result.patternId, details: result.details || {} });
+              destroyStreams(new Error('response_stream_blocked'));
+            }
+          })
+          .catch((err) => {
+            inspecting = false;
+            request.log.error({ step: 'stream:inspect_error', error: err?.message || String(err) });
+          });
+      }
+    });
+
+    source.pipe(tee);
+    reply.send(tee);
+
+    try {
+      await finished(tee);
+    } catch (err) {
+      request.log.error({ step: 'stream:passthrough_finish_error', error: err?.message || String(err) });
+    }
   }
 
   return {
@@ -489,6 +540,7 @@ export function buildProxyHandler(fastify) {
     );
     const responseStreamPassthrough = responseStreamEnabled && responseStreamBufferingMode === 'passthrough';
     const responseStreamBlockingAllowed = !responseStreamPassthrough;
+    const responseStreamChunkGatingEnabled = !!config.responseStreamChunkGatingEnabled;
 
     const dropPassthroughStream = (meta = {}) => {
       // Socket-level drop to enforce blocks when we've already streamed bytes to the client.
@@ -637,7 +689,8 @@ export function buildProxyHandler(fastify) {
             upstreamHost,
             appCfg.caBundle,
             reply,
-            liveInspectChunk
+            liveInspectChunk,
+            { gateChunks: responseStreamChunkGatingEnabled }
           )
         : backendPromise
           ? await backendPromise
@@ -784,4 +837,8 @@ export function buildProxyHandler(fastify) {
 }
 
 // Expose matcher helpers for targeted unit tests without altering runtime API surface.
-export { evaluateMatchers as _evaluateMatchers, selectApiKeyForPattern as _selectApiKeyForPattern };
+export {
+  evaluateMatchers as _evaluateMatchers,
+  selectApiKeyForPattern as _selectApiKeyForPattern,
+  streamBackendPassthrough as _streamBackendPassthrough
+};

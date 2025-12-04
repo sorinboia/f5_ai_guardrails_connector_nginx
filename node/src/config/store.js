@@ -20,6 +20,7 @@ export const SCAN_CONFIG_DEFAULTS = {
   responseStreamFinalEnabled: true,
   responseStreamCollectFullEnabled: false,
   responseStreamBufferingMode: 'buffer',
+  responseStreamChunkGatingEnabled: false,
 };
 
 function ensureDirExists(filePath) {
