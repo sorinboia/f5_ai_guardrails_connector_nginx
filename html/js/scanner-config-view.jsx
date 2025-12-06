@@ -161,6 +161,33 @@
     const extractorParallelEnabled = !!(config && config.extractorParallelEnabled);
     const effectiveRedactMode = useMemo(() => computeEffectiveRedactMode(config), [config]);
     const redactionConstraints = useMemo(() => describeRedactionConstraints(config), [config]);
+    const highlightCards = useMemo(() => {
+      if (!config) return [];
+      return [
+        {
+          label: 'Active Host',
+          value: hostDisplayLabel(selectedHost),
+          helper: 'Applies to requests matching this Host header.'
+        },
+        {
+          label: 'Inspection Mode',
+          value: config.inspectMode || '—',
+          helper: 'Choose which direction is scanned.'
+        },
+        {
+          label: 'Redaction',
+          value: effectiveRedactMode,
+          helper: redactionConstraints || 'Configured vs effective coverage.'
+        },
+        {
+          label: 'Streaming',
+          value: config.responseStreamEnabled ? 'Live chunking' : 'Disabled',
+          helper: config.responseStreamEnabled
+            ? (config.responseStreamCollectFullEnabled ? 'Full buffer scanning' : 'Chunk+overlap inspection')
+            : 'Standard synchronous inspection'
+        }
+      ];
+    }, [config, effectiveRedactMode, redactionConstraints, selectedHost]);
 
     const registerSection = id => el => {
       if (el) {
@@ -567,18 +594,18 @@
         <>
           <TopNavigation current="config" />
           <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
-          <div className="space-y-4">
-            <div className="h-64 rounded-3xl bg-white/70 shadow-sm" />
-          </div>
-          <div className="space-y-6">
-            <StatusBanner status={status} />
-            <div className="grid gap-6 sm:grid-cols-2">
-              {[...Array(4)].map((_, index) => (
-                <div key={index} className="h-48 animate-pulse rounded-3xl bg-white shadow-sm"></div>
-              ))}
+            <div className="space-y-4">
+              <div className="h-64 rounded-3xl bg-white/70 shadow-sm" />
+            </div>
+            <div className="space-y-6">
+              <StatusBanner status={status} />
+              <div className="grid gap-6 sm:grid-cols-2">
+                {[...Array(4)].map((_, index) => (
+                  <div key={index} className="h-48 animate-pulse rounded-3xl bg-white shadow-sm"></div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
         </>
       );
     }
@@ -587,6 +614,18 @@
       <>
         <TopNavigation current="config" />
         <ToastStack toasts={toasts} dismiss={dismissToast} />
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {highlightCards.map(card => (
+            <div
+              key={card.label}
+              className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm shadow-slate-200/70"
+            >
+              <p className="text-xs uppercase tracking-wide text-slate-500">{card.label}</p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">{card.value}</p>
+              <p className="mt-1 text-xs text-slate-500">{card.helper}</p>
+            </div>
+          ))}
+        </div>
         <form onSubmit={saveConfig} className="grid gap-8 lg:grid-cols-[280px_1fr]">
           <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
           <div className="space-y-10">
