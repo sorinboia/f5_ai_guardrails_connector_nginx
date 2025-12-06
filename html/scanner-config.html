@@ -13,14 +13,25 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
   <body class="bg-slate-100 text-slate-900">
-    <div class="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 py-10">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <header class="mb-10 text-center">
-          <p class="text-sm uppercase tracking-wide text-slate-500">Calypso Guardrails</p>
-          <h1 class="mt-2 text-4xl font-semibold text-slate-900">Scanning Control Panel</h1>
-          <p class="mt-4 text-base text-slate-600">
-            Refine how the proxy inspects traffic, redacts sensitive content, and records telemetry. Updates persist immediately to the NGINX key-value store.
-          </p>
+    <div class="min-h-screen">
+      <div class="content-container">
+        <header class="page-hero glass-panel mb-8 rounded-3xl px-6 py-6 sm:px-8 sm:py-8">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div class="space-y-3">
+              <p class="flex items-center text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Calypso Guardrails</p>
+              <div>
+                <h1 class="text-3xl font-bold text-slate-900 sm:text-4xl">Scanning Control Panel</h1>
+                <p class="mt-2 max-w-3xl text-sm text-slate-700 sm:text-base">
+                  Refine how the proxy inspects traffic, redacts sensitive content, and records telemetry. Every change is validated before it is written to the configuration store.
+                </p>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span class="text-xs uppercase tracking-wide text-slate-500">Management UI</span>
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">Live &amp; listening</span>
+            </div>
+          </div>
         </header>
         <div id="root"></div>
       </div>
