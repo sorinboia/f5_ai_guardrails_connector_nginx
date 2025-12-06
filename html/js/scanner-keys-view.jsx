@@ -9,6 +9,8 @@
     StatusBanner,
     Modal,
     TopNavigation,
+    PageHeader,
+    KpiCard,
     normalizeBlockingResponseConfig,
     createEmptyEditorForm,
     DEFAULT_BLOCKING_RESPONSE_SHAPE,
@@ -232,89 +234,124 @@
       }
     };
 
+    const totalKeys = keys.length;
+
     return (
       <>
         <TopNavigation current="keys" />
         <ToastStack toasts={toasts} dismiss={dismissToast} />
-        <StatusBanner status={status} />
-        <div className="mt-6 space-y-5 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">Configured Keys</h2>
-              <p className="text-sm text-slate-500">These keys can be referenced by pattern rules on the matching page.</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={loadKeys}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={openCreate}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-700"
-              >
-                New Key
-              </button>
-            </div>
+        <div className="space-y-8">
+          <PageHeader
+            kicker="Access control"
+            title="API keys"
+            description="Manage upstream tokens used by pattern rules and configure the blocking response returned when requests are denied."
+            meta={`${totalKeys} configured`}
+            actions={(
+              <>
+                <button
+                  type="button"
+                  onClick={loadKeys}
+                  className="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Refresh list
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="inline-flex items-center rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-primary-dark"
+                >
+                  New key
+                </button>
+              </>
+            )}
+          />
+          <StatusBanner status={status} />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <KpiCard label="Total keys" value={totalKeys} helper="Available to pattern rules" tone="emerald" />
+            <KpiCard label="Default block status" value={DEFAULT_BLOCKING_RESPONSE_SHAPE.status} helper={DEFAULT_BLOCKING_RESPONSE_SHAPE.contentType} tone="amber" />
+            <KpiCard label="Last sync" value={status.message || '—'} helper="API key service" tone="sky" />
           </div>
 
-          {keys.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
-              No API keys configured yet.
+          <div className="space-y-5 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">Configured Keys</h2>
+                <p className="text-sm text-slate-500">These keys can be referenced by pattern rules on the matching page.</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={loadKeys}
+                  className="rounded-full border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="rounded-full bg-primary px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-primary-dark"
+                >
+                  New Key
+                </button>
+              </div>
             </div>
-          ) : (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold">Name</th>
-                    <th className="px-4 py-3 text-left font-semibold">Key Preview</th>
-                    <th className="px-4 py-3 text-left font-semibold">Blocking Response</th>
-                    <th className="px-4 py-3 text-left font-semibold">Updated</th>
-                    <th className="px-4 py-3 text-right font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {keys.map(record => (
-                    <tr key={record.id}>
-                      <td className="px-4 py-3 font-medium text-slate-800">{record.name}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{keyPreview(record.key)}</td>
-                      <td className="px-4 py-3 text-slate-500">
-                        <div className="flex items-center gap-2 text-xs text-slate-600">
-                          <span className="font-semibold text-slate-700">{(record.blockingResponse && record.blockingResponse.status) || DEFAULT_BLOCKING_RESPONSE_SHAPE.status}</span>
-                          <span className="text-slate-400">•</span>
-                          <span>{(record.blockingResponse && record.blockingResponse.contentType) || DEFAULT_BLOCKING_RESPONSE_SHAPE.contentType}</span>
-                        </div>
-                        <div className="mt-1 truncate text-xs text-slate-500">
-                          {summarizeBlockingResponseBody(record.blockingResponse)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-500">{record.updated_at ? new Date(record.updated_at).toLocaleString() : '—'}</td>
-                      <td className="flex justify-end gap-2 px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(record)}
-                          className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(record)}
-                          className="rounded-md border border-rose-200 px-3 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50"
-                        >
-                          Delete
-                        </button>
-                      </td>
+
+            {keys.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
+                No API keys configured yet.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold">Name</th>
+                      <th className="px-4 py-3 text-left font-semibold">Key Preview</th>
+                      <th className="px-4 py-3 text-left font-semibold">Blocking Response</th>
+                      <th className="px-4 py-3 text-left font-semibold">Updated</th>
+                      <th className="px-4 py-3 text-right font-semibold">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {keys.map(record => (
+                      <tr key={record.id} className="hover:bg-slate-50/60">
+                        <td className="px-4 py-3 font-medium text-slate-800">{record.name}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-600">{keyPreview(record.key)}</td>
+                        <td className="px-4 py-3 text-slate-500">
+                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                            <span className="font-semibold text-slate-700">{(record.blockingResponse && record.blockingResponse.status) || DEFAULT_BLOCKING_RESPONSE_SHAPE.status}</span>
+                            <span className="text-slate-400">•</span>
+                            <span>{(record.blockingResponse && record.blockingResponse.contentType) || DEFAULT_BLOCKING_RESPONSE_SHAPE.contentType}</span>
+                          </div>
+                          <div className="mt-1 truncate text-xs text-slate-500">
+                            {summarizeBlockingResponseBody(record.blockingResponse)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">{record.updated_at ? new Date(record.updated_at).toLocaleString() : '—'}</td>
+                        <td className="flex justify-end gap-2 px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(record)}
+                            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(record)}
+                            className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 shadow-sm hover:bg-rose-50"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
         </div>
 
         <Modal

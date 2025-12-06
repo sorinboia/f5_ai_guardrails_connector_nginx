@@ -305,16 +305,20 @@
     </div>
   );
 
-  const SectionCard = React.forwardRef(({ id, title, description, children }, ref) => (
+  const SectionCard = React.forwardRef(({ id, title, description, children, meta }, ref) => (
     <section
       ref={ref}
       id={id}
-      className="scroll-mt-32 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+      className="scroll-mt-32 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl ring-1 ring-slate-100 backdrop-blur"
     >
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">{title}</h2>
-          {description && <p className="mt-2 text-sm text-slate-500">{description}</p>}
+      <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Section</p>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-semibold text-slate-900">{title}</h2>
+            {meta ? <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{meta}</span> : null}
+          </div>
+          {description && <p className="text-sm text-slate-600">{description}</p>}
         </div>
       </div>
       <div className="space-y-6">{children}</div>
@@ -400,7 +404,10 @@
 
   const TopNavigation = ({ current }) => (
     <div className="mb-8 flex justify-center">
-      <div className="inline-flex rounded-full border border-slate-300 bg-white/80 p-1 shadow-sm">
+      <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-2 py-1.5 shadow-lg backdrop-blur">
+        <span className="rounded-full bg-primary/10 px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-primary">
+          Guardrails UI
+        </span>
         {PAGE_LINKS.map(link => {
           const isActive = current === link.id;
           return (
@@ -409,7 +416,9 @@
               href={link.href}
               className={classNames(
                 'mx-1 rounded-full px-4 py-2 text-sm font-semibold transition',
-                isActive ? 'bg-blue-600 text-white shadow hover:bg-blue-700' : 'text-slate-600 hover:bg-slate-100'
+                isActive
+                  ? 'bg-primary text-white shadow hover:bg-primary-dark'
+                  : 'text-slate-600 hover:bg-slate-100'
               )}
             >
               {link.label}
@@ -419,6 +428,38 @@
       </div>
     </div>
   );
+
+  const PageHeader = ({ title, description, meta, actions, kicker }) => (
+    <div className="rounded-3xl border border-slate-200 bg-white/90 px-6 py-6 shadow-lg ring-1 ring-slate-100 backdrop-blur">
+      <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-3">
+          {kicker ? <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{kicker}</p> : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
+            {meta ? <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{meta}</span> : null}
+          </div>
+          {description ? <p className="max-w-3xl text-sm text-slate-600">{description}</p> : null}
+        </div>
+        {actions ? <div className="flex flex-wrap gap-3">{actions}</div> : null}
+      </div>
+    </div>
+  );
+
+  const KpiCard = ({ label, value, helper, tone = 'slate' }) => {
+    const toneClass = {
+      slate: 'from-slate-50 to-white border-slate-200 text-slate-800',
+      emerald: 'from-emerald-50 to-white border-emerald-100 text-emerald-800',
+      sky: 'from-sky-50 to-white border-sky-100 text-sky-800',
+      amber: 'from-amber-50 to-white border-amber-100 text-amber-800'
+    }[tone] || 'from-slate-50 to-white border-slate-200 text-slate-800';
+    return (
+      <div className={`rounded-2xl border bg-gradient-to-b px-4 py-3 shadow-sm ${toneClass}`}>
+        <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+        <p className="mt-2 text-2xl font-semibold">{value}</p>
+        {helper ? <p className="text-xs text-slate-500">{helper}</p> : null}
+      </div>
+    );
+  };
 
   const PatternMultiSelector = ({ label, helper, patterns, values, onToggle, disabled, note }) => (
     <div className="space-y-3">
@@ -794,6 +835,8 @@
     Modal,
     SelectField,
     TextField,
+    PageHeader,
+    KpiCard,
     SectionCard,
     StickyNav,
     SummaryChips,
