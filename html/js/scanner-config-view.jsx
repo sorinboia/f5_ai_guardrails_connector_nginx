@@ -22,7 +22,9 @@
     SummaryChips,
     TopNavigation,
     TextField,
-    PatternMultiSelector
+    PatternMultiSelector,
+    PageHeader,
+    KpiCard
   } = GuardrailsUI;
   const { useState, useEffect, useMemo, useRef } = React;
 
@@ -562,23 +564,45 @@
       return updatedAt ? `${hostLabel} last updated ${updatedAt.toLocaleString()}` : hostLabel;
     }, [config, updatedAt, selectedHost]);
 
+    const resetChanges = () => {
+      if (!serverConfig) return;
+      setConfig(JSON.parse(JSON.stringify(serverConfig)));
+      setStatus({ tone: 'info', message: 'Reverted to last saved configuration.' });
+      pushToast('info', 'Draft reverted to last save.');
+    };
+
+    const summaryStats = useMemo(() => ({
+      requestProfiles: (config && Array.isArray(config.requestExtractors) ? config.requestExtractors.length : 0),
+      responseProfiles: (config && Array.isArray(config.responseExtractors) ? config.responseExtractors.length : 0),
+      streaming: config && config.responseStreamEnabled ? 'Enabled' : 'Disabled',
+      inspect: config && config.inspectMode ? config.inspectMode : '—'
+    }), [config]);
+
     if (!config || !defaults) {
       return (
         <>
           <TopNavigation current="config" />
-          <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
-          <div className="space-y-4">
-            <div className="h-64 rounded-3xl bg-white/70 shadow-sm" />
-          </div>
-          <div className="space-y-6">
-            <StatusBanner status={status} />
-            <div className="grid gap-6 sm:grid-cols-2">
-              {[...Array(4)].map((_, index) => (
-                <div key={index} className="h-48 animate-pulse rounded-3xl bg-white shadow-sm"></div>
-              ))}
+          <div className="space-y-8">
+            <PageHeader
+              kicker="Live profile"
+              title="Preparing configuration"
+              description="Loading the most recent scan settings and defaults from the connector."
+              actions={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Loading…</span>}
+            />
+            <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
+              <div className="space-y-4">
+                <div className="h-64 rounded-3xl bg-white/60 shadow-sm" />
+              </div>
+              <div className="space-y-6">
+                <StatusBanner status={status} />
+                <div className="grid gap-6 sm:grid-cols-2">
+                  {[...Array(4)].map((_, index) => (
+                    <div key={index} className="h-48 animate-pulse rounded-3xl bg-white shadow-sm" />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
         </>
       );
     }
@@ -587,281 +611,283 @@
       <>
         <TopNavigation current="config" />
         <ToastStack toasts={toasts} dismiss={dismissToast} />
-        <form onSubmit={saveConfig} className="grid gap-8 lg:grid-cols-[280px_1fr]">
-          <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
-          <div className="space-y-10">
-            <SectionCard
-              ref={registerSection('overview')}
-              id="overview"
-              title="Current Snapshot"
-              description={statusSummary}
-            >
-              <HostSelector
-                hosts={hosts}
-                selectedHost={selectedHost}
-                onSelect={handleHostSelect}
-                onCreate={createHost}
-                onDelete={deleteHost}
-              />
-              <TextField
-                label="Backend Origin"
-                helper="Destination base URL for this host's upstream requests (e.g., https://api.openai.com)."
-                placeholder="https://api.openai.com"
-                value={config.backendOrigin || ''}
-                onChange={value => setConfig(prev => ({ ...prev, backendOrigin: value }))}
-              />
-              <StatusBanner status={status} />
-              <SummaryChips config={config} />
-            </SectionCard>
-
-            <SectionCard
-              ref={registerSection('mitm')}
-              id="mitm"
-              title="MITM Certificates"
-              description="Download the active root CA so clients can trust the HTTPS listener and forward proxy."
-            >
-              <p className="text-sm text-slate-600">
-                The certificate served here matches the connector's current TLS configuration (dynamic MITM CA when enabled, otherwise the static HTTPS cert). Import it into your client trust store to avoid TLS warnings.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <a
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                  href="/config/mitm/ca.pem"
-                  download
+        <form onSubmit={saveConfig} className="space-y-8">
+          <PageHeader
+            kicker="Live profile"
+            title="Scan configuration"
+            description="Tune inspection modes, pattern extraction, and streaming safeguards. Changes save immediately when applied and persist for the selected host."
+            meta={isDirty ? 'Draft changes' : 'Synced'}
+            actions={(
+              <>
+                <button
+                  type="button"
+                  onClick={resetChanges}
+                  className="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                  disabled={!isDirty}
                 >
-                  ⬇️ Download PEM (.pem)
-                </a>
-                <a
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                  href="/config/mitm/ca.cer"
-                  download
+                  Reset draft
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex items-center rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-primary-dark disabled:opacity-50"
                 >
-                  ⬇️ Download DER (.cer)
-                </a>
+                  {saving ? 'Saving…' : 'Save configuration'}
+                </button>
+              </>
+            )}
+          />
+          <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
+            <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
+            <div className="space-y-10">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <KpiCard label="Host" value={hostDisplayLabel(selectedHost)} helper={statusSummary} tone="slate" />
+                <KpiCard label="Inspect" value={summaryStats.inspect} helper="Request/response scope" tone="sky" />
+                <KpiCard label="Patterns" value={`${summaryStats.requestProfiles + summaryStats.responseProfiles}`} helper="Total extractors" tone="emerald" />
+                <KpiCard label="Streaming" value={summaryStats.streaming} helper={config.responseStreamEnabled ? 'Chunked downstream' : 'Buffered responses'} tone="amber" />
               </div>
-            </SectionCard>
 
-            <SectionCard
-              ref={registerSection('inspection')}
-              id="inspection"
-              title="Inspection Modes"
-              description="Control which message directions are screened by the guardrails service."
-            >
-              <SelectField
-                label="Inspection Mode"
-                helper="Select which portions of the conversation are inspected (request, response, or both)."
-                options={derivedOptions.inspectMode}
-                value={config.inspectMode}
-                onChange={value => handleSelectChange('inspectMode', value)}
-              />
-              <SelectField
-                label="Request Forwarding"
-                helper="Sequential waits for scan results and works with request redaction. Parallel dispatches upstream immediately and pauses request redaction during inspection."
-                options={derivedOptions.requestForwardMode}
-                value={config.requestForwardMode}
-                onChange={value => handleSelectChange('requestForwardMode', value)}
-              />
-            </SectionCard>
+              <SectionCard
+                ref={registerSection('overview')}
+                id="overview"
+                title="Current Snapshot"
+                description={statusSummary}
+                meta="Foundation"
+              >
+                <HostSelector
+                  hosts={hosts}
+                  selectedHost={selectedHost}
+                  onSelect={handleHostSelect}
+                  onCreate={createHost}
+                  onDelete={deleteHost}
+                />
+                <TextField
+                  label="Backend Origin"
+                  helper="Destination base URL for this host's upstream requests (e.g., https://api.openai.com)."
+                  placeholder="https://api.openai.com"
+                  value={config.backendOrigin || ''}
+                  onChange={value => setConfig(prev => ({ ...prev, backendOrigin: value }))}
+                />
+                <StatusBanner status={status} />
+                <SummaryChips config={config} />
+              </SectionCard>
 
-            <SectionCard
-              ref={registerSection('extraction')}
-              id="extraction"
-              title="Extraction Profiles"
-              description="Select which patterns supply extraction selectors and API keys."
-            >
-              <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">Parallel extractor mode</p>
-                  <p className="text-xs text-slate-500">
-                    When enabled, all matching profiles run per stage without redaction. Disable to evaluate profiles sequentially and allow redaction.
-                  </p>
+              <SectionCard
+                ref={registerSection('mitm')}
+                id="mitm"
+                title="MITM Certificates"
+                description="Forward proxy interception requires a trusted certificate."
+                meta="Security"
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <SummaryPill label="Issued To" value={defaults.mitmCommonName || '—'} />
+                  <SummaryPill label="Fingerprint" value={defaults.mitmFingerprint || '—'} />
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                <p className="text-sm text-slate-600">
+                  Place the PEM-encoded certificate and private key on the filesystem and configure the process with
+                  <code className="mx-1 rounded bg-slate-100 px-1 py-0.5 text-xs">MITM_CERT</code> and
+                  <code className="mx-1 rounded bg-slate-100 px-1 py-0.5 text-xs">MITM_KEY</code> environment variables.
+                </p>
+              </SectionCard>
+
+              <SectionCard
+                ref={registerSection('inspection')}
+                id="inspection"
+                title="Inspection Modes"
+                description="Decide what traffic to inspect and how requests forward to the backend."
+                meta="Policy"
+              >
+                <SelectField
+                  label="Inspect Direction"
+                  helper="Select whether to inspect requests, responses, both, or disable inspection."
+                  options={derivedOptions.inspectMode}
+                  value={config.inspectMode}
+                  onChange={value => handleSelectChange('inspectMode', value)}
+                />
+                <SelectField
+                  label="Request Forwarding"
+                  helper="Parallel forwarding skips request redaction and speeds up passthrough, while sequence mode redacts and enforces policy before forwarding."
+                  options={derivedOptions.requestForwardMode}
+                  value={config.requestForwardMode}
+                  onChange={value => handleSelectChange('requestForwardMode', value)}
+                />
+              </SectionCard>
+
+              <SectionCard
+                ref={registerSection('extraction')}
+                id="extraction"
+                title="Extraction Paths"
+                description="Choose patterns for request and response extraction."
+                meta="Patterning"
+              >
+                <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
                     checked={extractorParallelEnabled}
                     onChange={event => handleParallelToggle(event.target.checked)}
                   />
-                  Parallel
+                  <div className="space-y-1">
+                    <span className="block font-semibold">Enable Parallel Extractors</span>
+                    <span className="block text-slate-600">
+                      When enabled, the proxy fans out pattern extraction for each direction in parallel. Redaction is disabled for any direction with parallel extractors configured.
+                    </span>
+                  </div>
                 </label>
-              </div>
-
-              <PatternMultiSelector
-                label="Request Extraction Profiles"
-                helper="Selected profiles supply their own selectors and API keys."
-                note={extractorParallelEnabled
-                  ? 'All selected request profiles execute in parallel; request redaction is skipped while this mode is active.'
-                  : 'Profiles evaluate in selection order; the first match determines the scan.'}
-                patterns={patternMaps.contextMap.request}
-                values={requestExtractorIds}
-                onToggle={(patternId, checked) => handlePatternToggle('request', patternId, checked)}
-              />
-
-              <PatternMultiSelector
-                label="Response Extraction Profiles"
-                helper="Select patterns that control response extraction and API keys."
-                note={extractorParallelEnabled
-                  ? 'All selected response profiles execute in parallel; response redaction is skipped while this mode is active.'
-                  : 'Profiles evaluate in selection order; the first match determines the scan.'}
-                patterns={patternMaps.contextMap.response}
-                values={responseExtractorIds}
-                onToggle={(patternId, checked) => handlePatternToggle('response', patternId, checked)}
-              />
-            </SectionCard>
-
-            <SectionCard
-              ref={registerSection('streaming')}
-              id="streaming"
-              title="Response Streaming"
-              description="Control streaming inspection for Server-Sent Events and chunked responses."
-            >
-              <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">Stream inspection</p>
-                  <p className="text-xs text-slate-500">When enabled, responses are parsed incrementally and scanned chunk-by-chunk.</p>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <PatternMultiSelector
+                    label="Request Patterns"
+                    helper="Choose request patterns to evaluate before forwarding upstream."
+                    note="Parallel extraction disables request-side redaction."
+                    patterns={patternMaps.contextMap.request}
+                    values={requestExtractorIds}
+                    onToggle={(patternId, checked) => handlePatternToggle('request', patternId, checked)}
+                    disabled={config.inspectMode === 'off'}
+                  />
+                  <PatternMultiSelector
+                    label="Response Patterns"
+                    helper="Choose response patterns to evaluate before sending data back to the caller."
+                    note="Streaming shares these patterns when stream gating is enabled."
+                    patterns={patternMaps.contextMap.response}
+                    values={responseExtractorIds}
+                    onToggle={(patternId, checked) => handlePatternToggle('response', patternId, checked)}
+                    disabled={config.inspectMode === 'off'}
+                  />
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+              </SectionCard>
+
+              <SectionCard
+                ref={registerSection('streaming')}
+                id="streaming"
+                title="Response Streaming"
+                description="Control downstream streaming behavior and collection."
+                meta="Streaming"
+              >
+                <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
                     checked={!!config.responseStreamEnabled}
                     onChange={event => handleStreamToggle(event.target.checked)}
                   />
-                  Enabled
+                  <div className="space-y-1">
+                    <span className="block font-semibold">Enable Streamed Responses</span>
+                    <span className="block text-slate-600">
+                      Allow chunked streaming from upstream responses. When off, streams buffer fully before release.
+                    </span>
+                  </div>
                 </label>
-              </div>
-
-              <TextField
-                label="Chunk Size (bytes)"
-                helper={config.responseStreamCollectFullEnabled
-                  ? 'Chunking is ignored while full-stream inspection is enabled.'
-                  : 'How many bytes are grouped per inspection chunk. Must be between 128 and 65536.'}
-                type="number"
-                value={config.responseStreamChunkSize}
-                onChange={value => handleStreamNumberChange('responseStreamChunkSize', value)}
-                disabled={config.responseStreamCollectFullEnabled}
-              />
-
-              <TextField
-                label="Chunk Overlap (bytes)"
-                helper={config.responseStreamCollectFullEnabled
-                  ? 'Chunk overlap is skipped when scanning only the assembled stream.'
-                  : 'Bytes re-used from the previous chunk to preserve context. Must be smaller than the chunk size.'}
-                type="number"
-                value={config.responseStreamChunkOverlap}
-                onChange={value => handleStreamNumberChange('responseStreamChunkOverlap', value)}
-                disabled={config.responseStreamCollectFullEnabled}
-              />
-
-              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                  checked={!!config.responseStreamCollectFullEnabled}
-                  onChange={event => setConfig(prev => ({ ...prev, responseStreamCollectFullEnabled: event.target.checked }))}
-                />
-                <span>
-                  Wait for full stream before scanning
-                  <span className="block text-xs text-slate-500">Buffers the entire SSE message and runs a single inspection pass.</span>
-                </span>
-              </label>
-
-              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                  checked={!!config.responseStreamFinalEnabled}
-                  onChange={event => setConfig(prev => ({ ...prev, responseStreamFinalEnabled: event.target.checked }))}
-                />
-                <span>
-                  Run a final full-response pass after streaming
-                  <span className="block text-xs text-slate-500">Keeps the last full body inspection even when streaming is on.</span>
-                </span>
-              </label>
-
-              <SelectField
-                label="Streaming Delivery Mode"
-                helper="Choose whether to buffer the full SSE body before sending or stream chunks directly to clients."
-                options={derivedOptions.responseStreamBufferingMode}
-                value={config.responseStreamBufferingMode || 'buffer'}
-                onChange={value => setConfig(prev => ({ ...prev, responseStreamBufferingMode: value }))}
-              />
-
-              <label className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${config.responseStreamBufferingMode === 'passthrough' ? 'border-slate-200 bg-slate-50/70 text-slate-700' : 'border-slate-100 bg-slate-50 text-slate-400'}`}>
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                  checked={!!config.responseStreamChunkGatingEnabled}
-                  disabled={config.responseStreamBufferingMode !== 'passthrough'}
-                  onChange={event => setConfig(prev => ({ ...prev, responseStreamChunkGatingEnabled: event.target.checked }))}
-                />
-                <span>
-                  Gate each streamed chunk until its scan verdict
-                  <span className="block text-xs text-slate-500">
-                    Holds SSE/chunk bytes until live inspection clears them. Only applies when delivery mode is passthrough.
-                  </span>
-                </span>
-              </label>
-            </SectionCard>
-
-            <SectionCard
-              ref={registerSection('telemetry')}
-              id="telemetry"
-              title="Redaction & Logging"
-              description="Configure automatic masking behavior and the verbosity of NJS logs."
-            >
-              <SelectField
-                label="Redaction Mode"
-                helper={redactionConstraints
-                  ? `${redactionConstraints} Effective redaction: ${effectiveRedactMode}.`
-                  : `Effective redaction: ${effectiveRedactMode}. Choose request, response, both, or off.`}
-                options={derivedOptions.redactMode}
-                value={config.redactMode}
-                onChange={value => handleSelectChange('redactMode', value)}
-              />
-              <SelectField
-                label="Log Level"
-                helper="Choose how verbose the guardrails handler should be in the NGINX error log."
-                options={derivedOptions.logLevel}
-                value={config.logLevel}
-                onChange={value => handleSelectChange('logLevel', value)}
-              />
-            </SectionCard>
-
-            <div className="sticky bottom-4 z-40 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">Ready to apply your updates?</p>
-                  <p className="text-xs text-slate-500">Changes persist to the key-value store immediately after saving.</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <SelectField
+                    label="Buffering Mode"
+                    helper="Choose whether to buffer, gate on patterns, or passthrough streamed chunks."
+                    options={derivedOptions.responseStreamBufferingMode}
+                    value={config.responseStreamBufferingMode}
+                    onChange={value => setConfig(prev => ({ ...prev, responseStreamBufferingMode: value }))}
+                    disabled={!config.responseStreamEnabled}
+                  />
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      checked={!!config.responseStreamChunkGatingEnabled}
+                      onChange={event => setConfig(prev => ({ ...prev, responseStreamChunkGatingEnabled: event.target.checked }))}
+                      disabled={!config.responseStreamEnabled}
+                    />
+                    <div className="space-y-1">
+                      <span className="block font-semibold">Enable Pattern Gating</span>
+                      <span className="block text-slate-600">Hold each streamed chunk until it passes configured response patterns.</span>
+                    </div>
+                  </label>
                 </div>
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={resetToDefaults}
-                    className="inline-flex justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                  >
-                    Reset to Defaults
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      fetchConfig(selectedHost);
-                      fetchPatterns();
-                    }}
-                    className="inline-flex justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                  >
-                    Refresh from Server
-                  </button>
-                  <button
-                    type="submit"
-                    className={`inline-flex justify-center rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${isDirty ? '' : 'opacity-60'}`}
-                    aria-disabled={!isDirty}
-                    disabled={saving || !isDirty}
-                  >
-                    {saving ? 'Saving…' : 'Save Changes'}
-                  </button>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextField
+                    type="number"
+                    label="Chunk Size (bytes)"
+                    helper="Chunk size for streamed responses."
+                    value={config.responseStreamChunkSize || ''}
+                    onChange={value => handleStreamNumberChange('responseStreamChunkSize', value)}
+                    disabled={!config.responseStreamEnabled}
+                  />
+                  <TextField
+                    type="number"
+                    label="Chunk Overlap"
+                    helper="Overlap between streamed chunks to preserve context."
+                    value={config.responseStreamChunkOverlap || ''}
+                    onChange={value => handleStreamNumberChange('responseStreamChunkOverlap', value)}
+                    disabled={!config.responseStreamEnabled}
+                  />
                 </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      checked={!!config.responseStreamFinalEnabled}
+                      onChange={event => setConfig(prev => ({ ...prev, responseStreamFinalEnabled: event.target.checked }))}
+                      disabled={!config.responseStreamEnabled}
+                    />
+                    <div className="space-y-1">
+                      <span className="block font-semibold">Forward Final Message</span>
+                      <span className="block text-slate-600">Forward the final "done" message from streaming providers.</span>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      checked={!!config.responseStreamCollectFullEnabled}
+                      onChange={event => handleStreamToggle(event.target.checked, true)}
+                      disabled={!config.responseStreamEnabled}
+                    />
+                    <div className="space-y-1">
+                      <span className="block font-semibold">Collect Full Response</span>
+                      <span className="block text-slate-600">Persist the entire streaming response for auditing even when chunks flow immediately.</span>
+                    </div>
+                  </label>
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                ref={registerSection('telemetry')}
+                id="telemetry"
+                title="Redaction & Logging"
+                description="Control redaction behavior and log verbosity."
+                meta="Observability"
+              >
+                <SelectField
+                  label="Redaction Mode"
+                  helper={`Effective redaction mode: ${effectiveRedactMode}. ${redactionConstraints}`}
+                  options={derivedOptions.redactMode}
+                  value={config.redactMode}
+                  onChange={value => handleSelectChange('redactMode', value)}
+                />
+                <SelectField
+                  label="Log Level"
+                  helper="Control verbosity for connector logs."
+                  options={derivedOptions.logLevel}
+                  value={config.logLevel}
+                  onChange={value => handleSelectChange('logLevel', value)}
+                />
+              </SectionCard>
+              <div className="flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchConfig(selectedHost);
+                    fetchPatterns();
+                  }}
+                  className="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Reload from server
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex items-center rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-primary-dark disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save configuration'}
+                </button>
               </div>
             </div>
           </div>
