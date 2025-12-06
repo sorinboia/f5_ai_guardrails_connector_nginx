@@ -191,7 +191,7 @@
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`flex items-start gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur ${toneClasses[toast.tone] || toneClasses.info}`}
+          className={`glass-panel flex items-start gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur ${toneClasses[toast.tone] || toneClasses.info}`}
         >
           <span className="text-xl leading-none">{ICONS[toast.tone] || ICONS.info}</span>
           <div className="flex-1 text-sm">{toast.message}</div>
@@ -212,7 +212,7 @@
     if (!status.message) return null;
     const tone = toneClasses[status.tone] || toneClasses.info;
     return (
-      <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-sm ${tone}`}>
+      <div className={`glass-panel flex items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-sm ${tone}`}>
         <span className="text-lg leading-none">{ICONS[status.tone] || ICONS.info}</span>
         <span>{status.message}</span>
       </div>
@@ -309,7 +309,7 @@
     <section
       ref={ref}
       id={id}
-      className="scroll-mt-32 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+      className="scroll-mt-32 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur"
     >
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
@@ -323,8 +323,15 @@
 
   const StickyNav = ({ activeSection, onNavigate, isDirty }) => (
     <aside className="lg:sticky lg:top-24">
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-sm font-semibold text-slate-600">Configuration Sections</p>
+      <div className="glass-panel rounded-3xl border border-slate-200 p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-slate-700">Configuration Sections</p>
+          {isDirty ? (
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Unsaved</span>
+          ) : (
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Saved</span>
+          )}
+        </div>
         <nav className="mt-4 space-y-1">
           {NAV_SECTIONS.map(item => {
             const isActive = activeSection === item.id;
@@ -334,14 +341,14 @@
                 type="button"
                 onClick={() => onNavigate(item.id)}
                 aria-current={isActive ? 'true' : 'false'}
-                className={`group flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm font-medium transition ${
-                  isActive ? 'text-primary' : 'text-slate-600 hover:text-slate-900'
+                className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
+                  isActive ? 'bg-blue-50 text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                 }`}
               >
                 <span
-                  className={`h-2 w-2 rounded-full border transition ${
+                  className={`h-2.5 w-2.5 rounded-full border transition ${
                     isActive
-                      ? 'border-primary bg-primary'
+                      ? 'border-blue-500 bg-blue-500'
                       : 'border-slate-300 bg-transparent group-hover:border-slate-400'
                   }`}
                 ></span>
@@ -400,7 +407,7 @@
 
   const TopNavigation = ({ current }) => (
     <div className="mb-8 flex justify-center">
-      <div className="inline-flex rounded-full border border-slate-300 bg-white/80 p-1 shadow-sm">
+      <div className="glass-panel inline-flex rounded-full border border-slate-200 bg-white/80 p-1 shadow">
         {PAGE_LINKS.map(link => {
           const isActive = current === link.id;
           return (
@@ -408,7 +415,7 @@
               key={link.id}
               href={link.href}
               className={classNames(
-                'mx-1 rounded-full px-4 py-2 text-sm font-semibold transition',
+                'mx-1 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2',
                 isActive ? 'bg-blue-600 text-white shadow hover:bg-blue-700' : 'text-slate-600 hover:bg-slate-100'
               )}
             >

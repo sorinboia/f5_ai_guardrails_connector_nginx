@@ -20,6 +20,7 @@
     SelectField,
     StickyNav,
     SummaryChips,
+    SummaryPill,
     TopNavigation,
     TextField,
     PatternMultiSelector
@@ -28,7 +29,7 @@
 
   const HostSelector = ({ hosts, selectedHost, onSelect, onCreate, onDelete }) => {
     return (
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-slate-700">Active Host</p>
@@ -562,6 +563,13 @@
       return updatedAt ? `${hostLabel} last updated ${updatedAt.toLocaleString()}` : hostLabel;
     }, [config, updatedAt, selectedHost]);
 
+    const quickStats = useMemo(() => ([
+      { label: 'Inspection', value: config ? config.inspectMode : '—' },
+      { label: 'Redaction', value: effectiveRedactMode },
+      { label: 'Forwarding', value: config ? config.requestForwardMode : '—' },
+      { label: 'Streaming', value: config && config.responseStreamEnabled ? 'Enabled' : 'Disabled' }
+    ]), [config, effectiveRedactMode]);
+
     if (!config || !defaults) {
       return (
         <>
@@ -590,11 +598,53 @@
         <form onSubmit={saveConfig} className="grid gap-8 lg:grid-cols-[280px_1fr]">
           <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
           <div className="space-y-10">
+            <div className="glass-panel rounded-3xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Host Configuration</p>
+                  <h2 className="text-2xl font-semibold text-slate-900">{statusSummary}</h2>
+                  <p className="text-sm text-slate-600">Changes validate locally before being persisted to the key-value store.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={resetToDefaults}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    ⟳ Reset to Defaults
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchConfig(selectedHost);
+                      fetchPatterns();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    ↻ Refresh
+                  </button>
+                  <button
+                    type="submit"
+                    className={`inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${isDirty ? '' : 'opacity-60'}`}
+                    aria-disabled={!isDirty}
+                    disabled={saving || !isDirty}
+                  >
+                    {saving ? 'Saving…' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {quickStats.map(stat => (
+                  <SummaryPill key={stat.label} label={stat.label} value={stat.value} />
+                ))}
+              </div>
+            </div>
+
             <SectionCard
               ref={registerSection('overview')}
               id="overview"
               title="Current Snapshot"
-              description={statusSummary}
+              description="Define the upstream origin and map hosts to configuration profiles."
             >
               <HostSelector
                 hosts={hosts}
@@ -829,7 +879,7 @@
               />
             </SectionCard>
 
-            <div className="sticky bottom-4 z-40 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
+            <div className="sticky bottom-4 z-40 glass-panel rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Ready to apply your updates?</p>
