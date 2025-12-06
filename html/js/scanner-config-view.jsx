@@ -20,6 +20,9 @@
     SelectField,
     StickyNav,
     SummaryChips,
+    SummaryPill,
+    PageHeader,
+    Badge,
     TopNavigation,
     TextField,
     PatternMultiSelector
@@ -562,23 +565,31 @@
       return updatedAt ? `${hostLabel} last updated ${updatedAt.toLocaleString()}` : hostLabel;
     }, [config, updatedAt, selectedHost]);
 
+    const headerMeta = useMemo(() => {
+      if (!config) return [];
+      return [
+        <Badge tone="info" key="host">Host: {hostDisplayLabel(selectedHost)}</Badge>,
+        <Badge tone={isDirty ? 'warning' : 'success'} key="state">{isDirty ? 'Draft changes pending' : 'Synced to store'}</Badge>,
+        <Badge tone="neutral" key="stream">{config.responseStreamEnabled ? 'Streaming enabled' : 'Streaming disabled'}</Badge>
+      ];
+    }, [config, isDirty, selectedHost]);
+
     if (!config || !defaults) {
       return (
         <>
           <TopNavigation current="config" />
-          <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
-          <div className="space-y-4">
-            <div className="h-64 rounded-3xl bg-white/70 shadow-sm" />
-          </div>
-          <div className="space-y-6">
-            <StatusBanner status={status} />
-            <div className="grid gap-6 sm:grid-cols-2">
-              {[...Array(4)].map((_, index) => (
-                <div key={index} className="h-48 animate-pulse rounded-3xl bg-white shadow-sm"></div>
+          <PageHeader
+            eyebrow="Scan configuration"
+            title="Loading configuration"
+            description={status.message || 'Fetching the latest guardrails state.'}
+            meta={[<Badge tone="info" key="loading">Please wait</Badge>]}
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[...Array(3)].map((_, index) => (
+                <div key={index} className="h-20 animate-pulse rounded-2xl bg-slate-100"></div>
               ))}
             </div>
-          </div>
-        </div>
+          </PageHeader>
         </>
       );
     }
@@ -587,9 +598,44 @@
       <>
         <TopNavigation current="config" />
         <ToastStack toasts={toasts} dismiss={dismissToast} />
-        <form onSubmit={saveConfig} className="grid gap-8 lg:grid-cols-[280px_1fr]">
-          <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
-          <div className="space-y-10">
+        <form onSubmit={saveConfig} className="space-y-8">
+          <PageHeader
+            eyebrow="Scan configuration"
+            title="Pipeline and policy controls"
+            description="Drive consistent inspection, redaction, and logging behaviors before requests leave the connector."
+            meta={headerMeta}
+            actions={[
+              <button
+                key="refresh"
+                type="button"
+                onClick={() => {
+                  fetchConfig(selectedHost);
+                  fetchPatterns();
+                }}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100"
+              >
+                Refresh
+              </button>,
+              <button
+                key="save"
+                type="submit"
+                className={`inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${isDirty ? '' : 'opacity-60'}`}
+                aria-disabled={!isDirty}
+                disabled={saving || !isDirty}
+              >
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            ]}
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SummaryPill label="Inspect mode" value={config.inspectMode || '—'} />
+              <SummaryPill label="Effective redaction" value={effectiveRedactMode} />
+              <SummaryPill label="Last updated" value={updatedAt ? updatedAt.toLocaleString() : '—'} />
+            </div>
+          </PageHeader>
+          <div className="grid gap-8 lg:grid-cols-[300px_1fr]">
+            <StickyNav activeSection={activeSection} onNavigate={navigateTo} isDirty={isDirty} />
+            <div className="space-y-10">
             <SectionCard
               ref={registerSection('overview')}
               id="overview"

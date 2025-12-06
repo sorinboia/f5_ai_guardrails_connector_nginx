@@ -9,13 +9,16 @@
     StatusBanner,
     Modal,
     TopNavigation,
+    PageHeader,
+    Badge,
+    SummaryPill,
     normalizeBlockingResponseConfig,
     createEmptyEditorForm,
     DEFAULT_BLOCKING_RESPONSE_SHAPE,
     blockingResponsesEqual,
     summarizeBlockingResponseBody
   } = GuardrailsUI;
-  const { useState, useEffect } = React;
+  const { useState, useEffect, useMemo } = React;
 
   const ApiKeysApp = () => {
     const [keys, setKeys] = useState([]);
@@ -232,10 +235,46 @@
       }
     };
 
+    const headerMeta = useMemo(() => ([
+      <Badge tone="info" key="count">{keys.length} key{keys.length === 1 ? '' : 's'} configured</Badge>,
+      <Badge tone={status.tone === 'error' ? 'warning' : 'success'} key="state">{status.tone === 'error' ? 'Attention needed' : 'Healthy'}</Badge>,
+      <Badge tone="neutral" key="block">Default block {DEFAULT_BLOCKING_RESPONSE_SHAPE.status}</Badge>
+    ]), [keys.length, status.tone]);
+
     return (
       <>
         <TopNavigation current="keys" />
         <ToastStack toasts={toasts} dismiss={dismissToast} />
+        <PageHeader
+          eyebrow="Credential registry"
+          title="API keys"
+          description="Manage shared secrets used by pattern rules when calling upstream providers."
+          meta={headerMeta}
+          actions={[
+            <button
+              key="refresh"
+              type="button"
+              onClick={loadKeys}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100"
+            >
+              Refresh
+            </button>,
+            <button
+              key="create"
+              type="button"
+              onClick={openCreate}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-700"
+            >
+              New key
+            </button>
+          ]}
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <SummaryPill label="Keys available" value={keys.length || '—'} />
+            <SummaryPill label="Blocking status" value={DEFAULT_BLOCKING_RESPONSE_SHAPE.status} />
+            <SummaryPill label="Activity" value={status.message || 'Loading…'} />
+          </div>
+        </PageHeader>
         <StatusBanner status={status} />
         <div className="mt-6 space-y-5 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
