@@ -398,24 +398,74 @@
     );
   };
 
+  const Badge = ({ tone = 'neutral', children }) => {
+    const tones = {
+      neutral: 'bg-slate-100 text-slate-700 ring-slate-200',
+      success: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+      info: 'bg-sky-50 text-sky-700 ring-sky-100',
+      warning: 'bg-amber-50 text-amber-700 ring-amber-100'
+    };
+    return (
+      <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 ${tones[tone] || tones.neutral}`}>
+        {children}
+      </span>
+    );
+  };
+
+  const PageHeader = ({ eyebrow, title, description, meta, actions, children }) => (
+    <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-lg shadow-slate-900/5">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-16 top-0 h-40 w-40 rounded-full bg-blue-500/10 blur-3xl"></div>
+        <div className="absolute right-0 top-10 h-32 w-32 rounded-full bg-sky-400/10 blur-3xl"></div>
+      </div>
+      <div className="relative space-y-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            {eyebrow ? <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{eyebrow}</p> : null}
+            <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
+            {description ? <p className="max-w-3xl text-sm text-slate-600">{description}</p> : null}
+            {meta ? <div className="flex flex-wrap gap-3">{meta}</div> : null}
+          </div>
+          {actions ? <div className="flex flex-wrap justify-end gap-3">{actions}</div> : null}
+        </div>
+        {children ? <div className="space-y-3">{children}</div> : null}
+      </div>
+    </section>
+  );
+
   const TopNavigation = ({ current }) => (
-    <div className="mb-8 flex justify-center">
-      <div className="inline-flex rounded-full border border-slate-300 bg-white/80 p-1 shadow-sm">
-        {PAGE_LINKS.map(link => {
-          const isActive = current === link.id;
-          return (
-            <a
-              key={link.id}
-              href={link.href}
-              className={classNames(
-                'mx-1 rounded-full px-4 py-2 text-sm font-semibold transition',
-                isActive ? 'bg-blue-600 text-white shadow hover:bg-blue-700' : 'text-slate-600 hover:bg-slate-100'
-              )}
-            >
-              {link.label}
-            </a>
-          );
-        })}
+    <div className="mb-8 space-y-4">
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm shadow-slate-900/5 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-sm font-bold uppercase tracking-wide text-primary shadow-inner shadow-primary/20">GR</div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Guardrails Console</p>
+            <p className="text-sm font-semibold text-slate-800">Management UI</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <Badge tone="success">Data-plane ready</Badge>
+          <span className="hidden sm:inline">Forward proxy listens on 10000 · HTTP/HTTPS on 22080/22443</span>
+        </div>
+      </div>
+      <div className="flex justify-center">
+        <div className="inline-flex rounded-full border border-slate-300 bg-white/80 p-1 shadow-sm">
+          {PAGE_LINKS.map(link => {
+            const isActive = current === link.id;
+            return (
+              <a
+                key={link.id}
+                href={link.href}
+                className={classNames(
+                  'mx-1 rounded-full px-4 py-2 text-sm font-semibold transition',
+                  isActive ? 'bg-blue-600 text-white shadow hover:bg-blue-700' : 'text-slate-600 hover:bg-slate-100'
+                )}
+              >
+                {link.label}
+              </a>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -797,6 +847,8 @@
     SectionCard,
     StickyNav,
     SummaryChips,
+    Badge,
+    PageHeader,
     TopNavigation,
     PatternMultiSelector,
     STATUS_TONES,

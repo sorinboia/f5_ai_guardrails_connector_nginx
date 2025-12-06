@@ -9,9 +9,12 @@
     StatusBanner,
     Modal,
     TopNavigation,
+    PageHeader,
+    Badge,
+    SummaryPill,
     PatternMultiSelector
   } = GuardrailsUI;
-  const { useState, useEffect } = React;
+  const { useState, useEffect, useMemo } = React;
 
   const PatternsApp = () => {
     const renderContextLabel = ctx => {
@@ -245,10 +248,47 @@
       }
     };
 
+    const headerMeta = useMemo(() => ([
+      <Badge tone="info" key="patterns">{patterns.length} pattern{patterns.length === 1 ? '' : 's'}</Badge>,
+      <Badge tone={apiKeys.length ? 'success' : 'warning'} key="keys">{apiKeys.length} key{apiKeys.length === 1 ? '' : 's'} available</Badge>,
+      <Badge tone={status.tone === 'error' ? 'warning' : 'neutral'} key="status">{status.tone === 'error' ? 'Check status' : 'Ready'}</Badge>
+    ]), [apiKeys.length, patterns.length, status.tone]);
+
     return (
       <>
         <TopNavigation current="patterns" />
         <ToastStack toasts={toasts} dismiss={dismissToast} />
+        <PageHeader
+          eyebrow="Pattern registry"
+          title="Pattern rules"
+          description="Define payload matchers and link them to API keys for extractor routing."
+          meta={headerMeta}
+          actions={[
+            <button
+              key="refresh"
+              type="button"
+              onClick={loadAll}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100"
+            >
+              Refresh
+            </button>,
+            <button
+              key="create"
+              type="button"
+              onClick={openCreate}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
+              disabled={apiKeys.length === 0}
+            >
+              New pattern
+            </button>
+          ]}
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <SummaryPill label="Patterns" value={patterns.length || '—'} />
+            <SummaryPill label="API keys" value={apiKeys.length || '—'} />
+            <SummaryPill label="Status" value={status.message || 'Loading…'} />
+          </div>
+        </PageHeader>
         <StatusBanner status={status} />
         <div className="mt-6 space-y-5 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

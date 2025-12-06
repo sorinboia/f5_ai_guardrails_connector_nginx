@@ -12,14 +12,33 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
-  <body class="bg-slate-100 text-slate-900">
-    <div class="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 py-10">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <header class="mb-10 text-center">
-          <p class="text-sm uppercase tracking-wide text-slate-500">Calypso Guardrails</p>
-          <h1 class="mt-2 text-4xl font-semibold text-slate-900">Scanning Control Panel</h1>
-          <p class="mt-4 text-base text-slate-600">
-            Refine how the proxy inspects traffic, redacts sensitive content, and records telemetry. Updates persist immediately to the NGINX key-value store.
+  <body class="bg-slate-950 text-slate-900">
+    <div class="relative min-h-screen overflow-hidden bg-slate-950 py-10">
+      <div class="pointer-events-none absolute inset-0">
+        <div class="absolute -left-10 top-10 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl"></div>
+        <div class="absolute bottom-10 right-0 h-72 w-72 rounded-full bg-sky-400/10 blur-3xl"></div>
+      </div>
+      <div class="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <header class="mb-10 overflow-hidden rounded-3xl border border-white/10 bg-white/90 p-6 shadow-xl shadow-slate-900/10 backdrop-blur">
+          <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div class="space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Calypso Guardrails</p>
+              <div class="flex items-center gap-3">
+                <span class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-blue-600/30">GR</span>
+                <div>
+                  <h1 class="text-3xl font-semibold text-slate-900">Guardrails Experience Hub</h1>
+                  <p class="text-sm text-slate-600">Configure, observe, and tune inspection in a single view.</p>
+                </div>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">Live</span>
+              <span class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">Management Port 22100</span>
+              <span class="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-100">Forward Proxy 10000</span>
+            </div>
+          </div>
+          <p class="mt-4 max-w-4xl text-sm text-slate-600">
+            Refine how the proxy inspects traffic, redacts sensitive content, and records telemetry. Updates persist immediately to the NGINX key-value store and power the fast-path data plane.
           </p>
         </header>
         <div id="root"></div>
