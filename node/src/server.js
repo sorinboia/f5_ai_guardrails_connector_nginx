@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import Fastify from 'fastify';
+import { randomUUID } from 'crypto';
 import routes from './routes/index.js';
 import { loadConfigFromEnv, loadTlsOptions } from './config/env.js';
 import { createLogger } from './logging/logger.js';
@@ -64,7 +65,10 @@ function buildApp(config, logger, store, tlsOptions = null, routeOptions = {}) {
   const app = Fastify({
     logger,
     trustProxy: true,
-    https: tlsOptions || undefined
+    https: tlsOptions || undefined,
+    requestIdHeader: 'x-request-id',
+    requestIdLogLabel: 'trace_id',
+    genReqId: () => randomUUID()
   });
 
   app.decorate('appConfig', config);

@@ -118,7 +118,7 @@ Common: all responses `cache-control: no-store`; CORS allows `content-type` only
 
 ---
 ## 10) Logging & Telemetry
-- Pino logger emits JSON with request correlation; lower_snake_case fields for pattern results, outcomes, api_key_name, pattern_id, timings.
+- Pino logger emits JSON with per-request correlation (`trace_id`), `host`, and lower_snake_case fields for pattern results, outcomes, api_key_name, pattern_id, timings.
 - Header override `X-Sideband-Log` can raise verbosity (`debug|info|warn|err`) per request.
 - Access-style summaries logged at request completion; warnings emitted for disabled redaction with parallel mode or invalid configs.
 

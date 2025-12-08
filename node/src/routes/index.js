@@ -28,6 +28,11 @@ async function routes(fastify, opts) {
     const store = fastify.store || defaultStore();
     const host = getHeaderHost(request);
     const config = resolveConfig(store, host);
+
+    const withHost = request.log.child({ host });
+    request.log = withHost;
+    reply.log = withHost;
+
     const headerLevel = request.headers['x-sideband-log'];
     const targetLevel = normalizeLogLevel(headerLevel || config.logLevel, fastify.appConfig.logLevel);
     if (targetLevel && request.log.level !== targetLevel) {
