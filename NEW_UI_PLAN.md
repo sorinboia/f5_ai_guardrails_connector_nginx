@@ -139,5 +139,12 @@
 9) Final polish pass (states, focus rings, accessibility labels), then produce build and verify served via management port.
 
 ## Status
-- Done: Drafted end-to-end UI plan; aligned navigation (System + Collector tab), confirmed light-first theme with F5 branding (#E31735 accent).
-- Next: (1) Scaffold `ui/` Vite/React/TS/Tailwind/shadcn workspace with F5 light theme tokens; (2) Set up AppShell/sidebar routes including System/Collector tabs; (3) Add brand assets (F5 logomark SVG) and fonts; (4) Wire System tab export/import + cert download to validate API plumbing.
+- Done (Dec 8, 2025):
+  - Scaffolded `ui/` Vite/React/TS/Tailwind/shadcn workspace with F5 light theme tokens and fonts.
+  - Added AppShell with sidebar/top bar navigation for Monitor, Config, System/Collector; mobile drawer included.
+  - Added branded favicon/logomark, global styles, and placeholder pages for Logs, Host Config, API Keys, Pattern Rules, System, Collector aligned to NEW_UI_PLAN sections.
+- Next:
+  1) Wire data layer (React Query hooks + DTO/types/zod) to `/config/api`, `/config/api/keys`, `/config/api/patterns`, `/collector/api` and implement forms/tables.
+  2) Connect System export/import + cert download to live endpoints and add confirmation/dropzone flows.
+  3) Update `node/src/routes/static.js` + root scripts to serve `ui/dist` with SPA fallback; replace legacy `html/` assets during build.
+  4) Add Vitest + RTL coverage for form validation and shell rendering; document smoke steps in `tests/README.md`.

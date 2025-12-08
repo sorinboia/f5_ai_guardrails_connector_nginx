@@ -10,6 +10,9 @@
 - `REFACTOR.md` at the repo root is the source of truth for the ongoing Node proxy/pipeline refactor. Keep it updated with decisions, milestone status, and scope changes until the effort is finished.
 - New refactor PRs should link back to the relevant milestones in `REFACTOR.md` and avoid behavioural drift from `SPEC.md` unless updated in the same change set.
 
+### New UI Tracking
+- While the new React/Tailwind management UI is in progress, every meaningful UI change must also update the **Status** and **Next** sections of `NEW_UI_PLAN.md` in the same change set to keep progress synchronized.
+
 ## Specification (SPEC.md)
 - `SPEC.md` at the repo root is the authoritative contract for the Node connector: endpoints, headers, pipeline stages, shared stores, defaults, and invariants.
 - **Any behaviour change requires a matching `SPEC.md` update in the same change set.** Keep the spec in lockstep with implementation and tests.

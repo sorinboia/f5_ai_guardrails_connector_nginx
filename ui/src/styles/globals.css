@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 45 7% 96%;
+  --foreground: 222 47% 12%;
+  --muted: 215 16% 94%;
+  --muted-foreground: 220 10% 46%;
+  --card: 0 0% 100%;
+  --border: 215 17% 90%;
+  --input: 215 17% 90%;
+  --accent: 352 82% 49%;
+  --accent-foreground: 0 0% 100%;
+  --success: 197 90% 52%;
+  --warning: 35 92% 54%;
+  --ring: 352 82% 49%;
+  --radius: 0.75rem;
+}
+
+[data-theme='dark'] {
+  --background: 222 47% 6%;
+  --foreground: 210 40% 98%;
+  --muted: 215 25% 18%;
+  --muted-foreground: 220 10% 65%;
+  --card: 222 47% 9%;
+  --border: 215 16% 24%;
+  --input: 215 16% 24%;
+  --accent: 352 82% 55%;
+  --accent-foreground: 0 0% 100%;
+  --success: 197 90% 56%;
+  --warning: 35 92% 58%;
+  --ring: 352 82% 55%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    background-image: radial-gradient(circle at 20% 20%, rgba(227, 23, 53, 0.05), transparent 32%),
+      radial-gradient(circle at 80% 10%, rgba(14, 165, 233, 0.08), transparent 26%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+  ::selection {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+  }
+}
+
+@layer components {
+  .surface {
+    @apply bg-card/90 border rounded-xl shadow-subtle backdrop-blur;
+  }
+  .text-dim {
+    @apply text-muted-foreground;
+  }
+}
