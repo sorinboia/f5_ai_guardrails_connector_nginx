@@ -100,6 +100,7 @@ JSON file schema:
 ## 8) Management APIs (`node/src/routes/management.js`)
 Common: all responses `cache-control: no-store`; CORS allows `content-type` only; status codes mirror legacy behaviour.
 - **/config/api**: GET returns `{ config, host, hosts, options, defaults }`; POST creates host (409 on duplicate); PATCH merges validated fields; DELETE removes non-default host; OPTIONS enumerates verbs.
+- **/config/api/store**: GET streams the entire persisted store (hosts, hostConfigs, apiKeys, patterns, collector) as JSON with `content-disposition` attachment; PUT replaces the store after `validateStoreShape` sanitization and responds with `{ store, host, hosts, config, defaults, options }` for the active host (defaults to `__default__` when the requested host is absent).
 - **/config/api/keys**: CRUD API keys with shape `{ id, name, key, blockingResponse, created_at, updated_at }`; `blockingResponse` sanitized to `{status 100-999, contentType, body}` with default 200 JSON blocking body.
 - **/config/api/patterns**: CRUD patterns with shape `{ id, name, context, apiKeyName, paths, matchers, notes, created_at, updated_at }`.
   - `context ∈ request|response|response_stream` (alias `response-stream`).

@@ -72,6 +72,7 @@
   const ConfigApp = () => {
     const sectionRefs = useRef({});
     const hasSyncedHostRef = useRef(false);
+    const fileInputRef = useRef(null);
     const [status, setStatus] = useState({ tone: 'loading', message: 'Loading configuration…' });
     const [config, setConfig] = useState(null);
     const [serverConfig, setServerConfig] = useState(null);
@@ -84,6 +85,8 @@
     const [hosts, setHosts] = useState([DEFAULT_HOST]);
     const [selectedHost, setSelectedHost] = useState(DEFAULT_HOST);
     const [patterns, setPatterns] = useState([]);
+    const [downloadingStore, setDownloadingStore] = useState(false);
+    const [uploadingStore, setUploadingStore] = useState(false);
 
     const pushToast = (tone, message) => {
       const id = Date.now() + Math.random();
@@ -261,6 +264,65 @@
       }
     };
 
+    const downloadStore = async () => {
+      try {
+        setDownloadingStore(true);
+        const response = await fetch('/config/api/store', {
+          headers: { Accept: 'application/json' }
+        });
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+        const text = await response.text();
+        const disposition = response.headers.get('content-disposition') || '';
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        const fallbackName = `guardrails-config-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        const filename = match && match[1] ? match[1] : fallbackName;
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(url);
+        pushToast('success', 'Configuration downloaded.');
+      } catch (error) {
+        pushToast('error', `Download failed: ${error.message}`);
+      } finally {
+        setDownloadingStore(false);
+      }
+    };
+
+    const importStore = async (payload, fileName) => {
+      setUploadingStore(true);
+      setStatus({ tone: 'loading', message: `Uploading ${fileName || 'configuration'}…` });
+      try {
+        const response = await fetch('/config/api/store', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          const message = data.errors ? data.errors.join('; ') : data.message || data.error || `Request failed (${response.status})`;
+          throw new Error(message);
+        }
+        const data = await response.json();
+        applyStoreResponse(data);
+        const message = `Configuration imported${fileName ? ` from ${fileName}` : ''}.`;
+        setStatus({ tone: 'success', message });
+        pushToast('success', message);
+      } catch (error) {
+        const message = `Import failed: ${error.message}`;
+        setStatus({ tone: 'error', message });
+        pushToast('error', message);
+      } finally {
+        setUploadingStore(false);
+      }
+    };
+
     useEffect(() => {
       const persistedHost = readPersistedHost();
       const targetHost = persistedHost || DEFAULT_HOST;
@@ -286,6 +348,27 @@
           pushToast('info', 'Sequential forwarding respects your configured request redaction.');
         }
       }
+    };
+
+    const applyStoreResponse = data => {
+      if (!data) return;
+      const hostList = Array.isArray(data.hosts) && data.hosts.length ? data.hosts.map(normalizeHost) : [DEFAULT_HOST];
+      const requestedHost = normalizeHost(data.host || selectedHost || DEFAULT_HOST);
+      const nextHost = hostList.includes(requestedHost) ? requestedHost : hostList[0] || DEFAULT_HOST;
+      const hydratedConfig = hydrateConfig(data.config || {});
+      const hydratedDefaults = hydrateConfig(data.defaults || defaults || {});
+      setHosts(hostList);
+      setSelectedHost(nextHost);
+      setConfig(hydratedConfig);
+      setServerConfig(hydratedConfig);
+      setDefaults(hydratedDefaults);
+      setOptions(data.options || options);
+      if (data.store && Array.isArray(data.store.patterns)) {
+        setPatterns(data.store.patterns);
+      } else if (Array.isArray(data.patterns)) {
+        setPatterns(data.patterns);
+      }
+      setUpdatedAt(new Date());
     };
 
     const handlePatternToggle = (context, patternId, checked) => {
@@ -354,6 +437,33 @@
       const message = `Defaults staged for ${hostDisplayLabel(selectedHost)}. Save to persist.`;
       setStatus({ tone: 'info', message });
       pushToast('info', message);
+    };
+
+    const handleUploadClick = () => {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+    };
+
+    const handleStoreFileChange = event => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async e => {
+        const text = e.target && typeof e.target.result === 'string' ? e.target.result : '';
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (err) {
+          pushToast('error', `File is not valid JSON: ${err.message}`);
+          setStatus({ tone: 'error', message: 'Import aborted: invalid JSON payload.' });
+          event.target.value = '';
+          return;
+        }
+        await importStore(parsed, file.name);
+        event.target.value = '';
+      };
+      reader.readAsText(file);
     };
 
     const saveConfig = async event => {
@@ -603,6 +713,42 @@
                 onCreate={createHost}
                 onDelete={deleteHost}
               />
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700">Backup & Restore</p>
+                    <p className="text-xs text-slate-500">Download the full configuration store or replace it with a JSON export.</p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      onClick={downloadStore}
+                      className="inline-flex justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-60"
+                      disabled={downloadingStore || uploadingStore}
+                    >
+                      {downloadingStore ? 'Preparing…' : '⬇️ Download JSON'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUploadClick}
+                      className="inline-flex justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700 disabled:opacity-60"
+                      disabled={uploadingStore || downloadingStore}
+                    >
+                      {uploadingStore ? 'Uploading…' : '⬆️ Upload JSON'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/json"
+                      className="hidden"
+                      onChange={handleStoreFileChange}
+                    />
+                  </div>
+                </div>
+                <p className="text-[0.8rem] text-slate-500">
+                  The archive includes hosts, API keys, patterns, and collector entries. Uploads fully replace the current store after validation.
+                </p>
+              </div>
               <TextField
                 label="Backend Origin"
                 helper="Destination base URL for this host's upstream requests (e.g., https://api.openai.com)."

@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import { normalizeHostName, resolveConfig, validateConfigPatch } from '../config/validate.js';
 import { respondJson, optionsReply, getHeaderHost, ensureHeaderMatchesHost } from './helpers.js';
-import { defaultStore, saveStore } from '../config/store.js';
+import { defaultStore, saveStore, validateStoreShape } from '../config/store.js';
 import { scheduleCollection, clearCollection } from '../pipeline/collector.js';
 
 function ensureHost(store, host) {
@@ -10,6 +10,25 @@ function ensureHost(store, host) {
   if (!store.hostConfigs[target]) store.hostConfigs[target] = {};
   return target;
 }
+
+function replaceStore(target, nextStore) {
+  const keys = new Set(Object.keys(target));
+  Object.entries(nextStore).forEach(([key, value]) => {
+    target[key] = value;
+    keys.delete(key);
+  });
+  keys.forEach((key) => {
+    delete target[key];
+  });
+}
+
+const CONFIG_OPTIONS = {
+  inspectMode: ['off', 'request', 'response', 'both'],
+  redactMode: ['off', 'request', 'response', 'both'],
+  logLevel: ['debug', 'info', 'warn', 'err'],
+  requestForwardMode: ['sequential', 'parallel'],
+  responseStreamBufferingMode: ['buffer', 'passthrough']
+};
 
 function removeHost(store, host) {
   const target = normalizeHostName(host);
@@ -63,13 +82,7 @@ async function configApi(fastify) {
       config,
       host,
       hosts: store.hosts,
-      options: {
-        inspectMode: ['off', 'request', 'response', 'both'],
-        redactMode: ['off', 'request', 'response', 'both'],
-        logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel'],
-        responseStreamBufferingMode: ['buffer', 'passthrough']
-      },
+      options: CONFIG_OPTIONS,
       defaults: resolveConfig(store, '__default__')
     });
   });
@@ -101,13 +114,7 @@ async function configApi(fastify) {
       applied: updates,
       host: targetHost,
       hosts: store.hosts,
-      options: {
-        inspectMode: ['off', 'request', 'response', 'both'],
-        redactMode: ['off', 'request', 'response', 'both'],
-        logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel'],
-        responseStreamBufferingMode: ['buffer', 'passthrough']
-      },
+      options: CONFIG_OPTIONS,
       defaults: resolveConfig(store, '__default__')
     });
   });
@@ -138,13 +145,7 @@ async function configApi(fastify) {
       applied: payload.config || {},
       host: targetHost,
       hosts: store.hosts,
-      options: {
-        inspectMode: ['off', 'request', 'response', 'both'],
-        redactMode: ['off', 'request', 'response', 'both'],
-        logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel'],
-        responseStreamBufferingMode: ['buffer', 'passthrough']
-      },
+      options: CONFIG_OPTIONS,
       defaults: resolveConfig(store, '__default__')
     });
   });
@@ -166,13 +167,7 @@ async function configApi(fastify) {
       host: '__default__',
       hosts: store.hosts,
       config,
-      options: {
-        inspectMode: ['off', 'request', 'response', 'both'],
-        redactMode: ['off', 'request', 'response', 'both'],
-        logLevel: ['debug', 'info', 'warn', 'err'],
-        requestForwardMode: ['sequential', 'parallel'],
-        responseStreamBufferingMode: ['buffer', 'passthrough']
-      },
+      options: CONFIG_OPTIONS,
       defaults: config
     });
   });
@@ -337,6 +332,43 @@ async function patternsApi(fastify) {
   });
 }
 
+async function storeApi(fastify) {
+  fastify.options('/config/api/store', async (_, reply) => optionsReply(reply, 'GET, PUT, OPTIONS', 'content-type'));
+
+  fastify.get('/config/api/store', async (request, reply) => {
+    const store = fastify.store || defaultStore();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `guardrails-config-${timestamp}.json`;
+    reply
+      .header('content-disposition', `attachment; filename="${filename}"`)
+      .header('cache-control', 'no-store');
+    return respondJson(reply, 200, store, 'GET, PUT, OPTIONS');
+  });
+
+  fastify.put('/config/api/store', async (request, reply) => {
+    const payload = getBody(request);
+    const { ok, store: nextStore, errors } = validateStoreShape(payload);
+    if (!ok) return respondJson(reply, 400, { error: 'validation_failed', errors });
+
+    const store = fastify.store || defaultStore();
+    replaceStore(store, nextStore);
+    saveStore(store, fastify.log, fastify.appConfig.storePath);
+
+    const requestedHost = normalizeHostName(getHeaderHost(request));
+    const activeHost = store.hosts.includes(requestedHost) ? requestedHost : '__default__';
+    const config = resolveConfig(store, activeHost);
+
+    return respondJson(reply, 200, {
+      store,
+      host: activeHost,
+      hosts: store.hosts,
+      config,
+      defaults: resolveConfig(store, '__default__'),
+      options: CONFIG_OPTIONS
+    });
+  });
+}
+
 async function collectorApi(fastify) {
   fastify.options('/collector/api', async (_, reply) => optionsReply(reply, 'GET, POST, OPTIONS', 'content-type'));
 
@@ -369,6 +401,7 @@ async function managementRoutes(fastify) {
   await configApi(fastify);
   await apiKeys(fastify);
   await patternsApi(fastify);
+  await storeApi(fastify);
   await collectorApi(fastify);
 }
 
