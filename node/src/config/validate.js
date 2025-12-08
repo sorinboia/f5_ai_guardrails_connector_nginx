@@ -1,4 +1,7 @@
 import { SCAN_CONFIG_DEFAULTS } from './store.js';
+import { normalizeHostName } from './hosts.js';
+
+export { normalizeHostName };
 
 export const SCAN_CONFIG_ENUMS = {
   inspectMode: ['off', 'request', 'response', 'both'],
@@ -7,11 +10,6 @@ export const SCAN_CONFIG_ENUMS = {
   requestForwardMode: ['sequential', 'parallel'],
   responseStreamBufferingMode: ['buffer', 'passthrough'],
 };
-
-export function normalizeHostName(host) {
-  const value = (host || '').trim().toLowerCase();
-  return value || '__default__';
-}
 
 function isHttpUrl(value) {
   return typeof value === 'string' && /^(https?:)\/\//i.test(value);

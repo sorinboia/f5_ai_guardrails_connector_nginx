@@ -1,16 +1,7 @@
 import http from 'http';
 import https from 'https';
 import net from 'net';
-import { normalizeHostName } from './config/validate.js';
-
-function isDestinationAllowed(store, host) {
-  if (!host) return false;
-  const normalized = normalizeHostName(host);
-  if (normalized === '__default__') return false;
-  const hosts = store?.hosts || [];
-  const configs = store?.hostConfigs || {};
-  return hosts.includes(normalized) || Boolean(configs[normalized]);
-}
+import { isHostAllowed } from './config/hosts.js';
 
 function resolveLocalTargetFromUrl(url, config) {
   const isHttps = url.protocol === 'https:' || url.port === '443';
@@ -58,7 +49,7 @@ function forwardHttpRequest(req, res, context) {
   }
 
   const destinationHost = parsedUrl.hostname;
-  if (!isDestinationAllowed(context.store, destinationHost)) {
+  if (!isHostAllowed(context.store, destinationHost)) {
     context.logger.warn({ step: 'forward_proxy:denied', host: destinationHost });
     respondHttpError(res, 403, 'Destination not allowed');
     return;
@@ -115,7 +106,7 @@ function handleConnect(req, clientSocket, head, context) {
   }
 
   const destinationHost = hostname;
-  if (!isDestinationAllowed(context.store, destinationHost)) {
+  if (!isHostAllowed(context.store, destinationHost)) {
     context.logger.warn({ step: 'forward_proxy:connect_denied', host: destinationHost });
     respondForbiddenSocket(clientSocket);
     return;

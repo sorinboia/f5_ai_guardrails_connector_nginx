@@ -1,25 +1,8 @@
-import fs from 'fs';
-import { Agent, fetch } from 'undici';
+import { fetch } from 'undici';
+import { getDispatcher } from './dispatcher.js';
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_UA = 'njs-sideband/1.0';
-
-const agentCache = new Map();
-
-function getDispatcher(caBundle, logger) {
-  if (!caBundle) return undefined;
-  if (agentCache.has(caBundle)) return agentCache.get(caBundle);
-
-  try {
-    const ca = fs.readFileSync(caBundle, 'utf8');
-    const agent = new Agent({ connect: { ca } });
-    agentCache.set(caBundle, agent);
-    return agent;
-  } catch (err) {
-    logger?.warn({ err, caBundle }, 'Failed to load CA bundle; using default trust store');
-    return undefined;
-  }
-}
 
 export async function callSideband({
   url,

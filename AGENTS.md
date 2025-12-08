@@ -6,14 +6,15 @@
 - Legacy MITM sidecar assets remain in the repo but are no longer started; forward proxying is handled in-process by Node.
 - Tests and smoke flows live in `tests/`; keep fixtures and scripts there and align coverage notes in `tests/README.md` when you add or change cases.
 
+## Refactoring Plan
+- `REFACTOR.md` at the repo root is the source of truth for the ongoing Node proxy/pipeline refactor. Keep it updated with decisions, milestone status, and scope changes until the effort is finished.
+- New refactor PRs should link back to the relevant milestones in `REFACTOR.md` and avoid behavioural drift from `SPEC.md` unless updated in the same change set.
+
 ## Specification (SPEC.md)
 - `SPEC.md` at the repo root is the authoritative contract for the Node connector: endpoints, headers, pipeline stages, shared stores, defaults, and invariants.
 - **Any behaviour change requires a matching `SPEC.md` update in the same change set.** Keep the spec in lockstep with implementation and tests.
 - Read it first before modifying flows; reviewers should reject changes that drift from or omit spec updates.
 
-## Migration Plan (MIGRATION.md)
-- `MIGRATION.md` chronicles the cutover from NGINX+njs to the current Fastify/Node service; migration phases 1–8 are complete and rollback requires checking out pre-cutover commits.
-- If you touch remaining migration follow-ups (integration/perf validation, release artefacts, observability), update status and notes in `MIGRATION.md` alongside the code.
 
 ## Build, Test, and Development Commands
 - Install and run locally: `cd node && npm install`, then `npm run dev` (data HTTP 22080; data HTTPS 22443 when `HTTPS_CERT`/`HTTPS_KEY` are present; management HTTP 22100). Use `npm start` for production-mode runs.

@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import routes from './routes/index.js';
 import { loadConfigFromEnv, loadTlsOptions } from './config/env.js';
 import { createLogger } from './logging/logger.js';
-import { loadStore, saveStore } from './config/store.js';
+import { loadStore, saveStore, validateStoreShape } from './config/store.js';
 import { startForwardProxy } from './forwardProxy.js';
 
 function applyStoreUpdate(target, next) {
@@ -32,7 +32,12 @@ function watchStore(store, logger, storePath) {
     try {
       const content = fs.readFileSync(resolved, 'utf8');
       const parsed = JSON.parse(content);
-      applyStoreUpdate(store, parsed);
+      const { ok, store: next, errors } = validateStoreShape(parsed);
+      if (!ok) {
+        logger.warn({ errors, storePath: resolved }, 'Rejected store reload due to validation errors');
+        return;
+      }
+      applyStoreUpdate(store, next);
       logger.info({ storePath: resolved }, 'Store reloaded from disk');
     } catch (err) {
       logger.warn({ err, storePath: resolved }, 'Failed to reload store file');

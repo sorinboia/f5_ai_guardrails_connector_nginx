@@ -21,8 +21,10 @@ Tests now target the Fastify/Node connector (NGINX is retired). This file invent
 - **Patterns (`/config/api/patterns`)**: context validation (request/response/response_stream), matcher requirements, API key existence, name uniqueness per context.
 - **Collector (`/collector/api`)**: quota clamp at 50, clear/count semantics, entry storage.
 - **Proxy & Inspection Pipeline**: sequential vs parallel forwarding, guardrail outcomes (cleared/flagged/redacted), matcher gating, request/response redaction, fail-open fallback, `/api/tags` bypass.
-- **Streaming Inspection**: SSE detection, chunk overlap defaults (2048/128), chunk boundary handling, final inspection toggle.
+- **Streaming Inspection**: SSE detection, chunk overlap defaults (2048/128), chunk boundary handling, final inspection toggle, passthrough chunk gating/drop flow.
 - **Backend Origin Resolution**: host-specific backendOrigin, invalid URL fallback, host list maintenance.
+- **Backend Client & Dispatcher**: request header filtering, buffered fetch, passthrough streaming drop on live block, abortable upstream start, CA bundle caching/fallback.
+- **Store Persistence & Allowlist**: store shape validation/fallback, host normalization, forward-proxy allowlist helper.
 - **Logging & Telemetry**: pattern_result fields, log-level override via `X-Sideband-Log`.
 
 ## Execution Helpers
