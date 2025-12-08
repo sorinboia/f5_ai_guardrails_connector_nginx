@@ -1,6 +1,11 @@
 # Coding Agent Handbook
 
-Quick context for anyone making changes in this repo. Keep specs and behaviour in sync.
+Quick context for anyone making changes in this repo. Default stance: keep specs and behaviour in sync, and prefer small, tested changes over surprises.
+
+## Read This First
+- Always skim `SPEC.md`, `SPEC_BACKEND.md`, and `SPEC_FRONTEND.md` before touching code; they are the source of truth for contracts, ports, defaults, and invariants.
+- Behavioural change or new API/UI surface? Update the relevant spec in the same change set.
+- If something in code conflicts with a spec, assume the spec is right until clarified.
 
 ## What This Repo Contains
 - Fastify-based proxy that inspects/forwards HTTP(S) traffic: main entry `node/src/server.js`; pipeline helpers under `node/src/pipeline/`; config/env/storage under `node/src/config/`; forward proxy in `node/src/forwardProxy.js`.
@@ -14,8 +19,8 @@ Quick context for anyone making changes in this repo. Keep specs and behaviour i
 If you change behaviour or contracts, update the relevant spec(s) in the same change set.
 
 ## Runtime Topology
-- Ports: data HTTP `22080`; data HTTPS `22443` when cert/key present; management/UI `22100`; forward proxy `10000` (can disable via `FORWARD_PROXY_ENABLED=false`).
-- TLS assets in `certs/`; static UI served from `html/`.
+- Ports: data HTTP `22080`; data HTTPS `22443` when cert/key present; management/UI `22100`; forward proxy `10000` (disable via `FORWARD_PROXY_ENABLED=false`).
+- TLS assets live in `certs/`; static UI served from `html/`.
 
 ## Dev & Build Commands
 - Backend dev: `cd node && npm install && npm run dev` (uses env defaults; HTTPS starts when certs exist). Prod: `npm start`.
@@ -28,12 +33,23 @@ If you change behaviour or contracts, update the relevant spec(s) in the same ch
 - Config must come from env or the store; never hard-code secrets.
 
 ## Testing & Coverage
-- Add targeted Vitest coverage for new helpers/pipeline branches. Keep smoke scripts current when behaviour shifts; document manual/smoke steps in `tests/README.md`.
+- Add targeted Vitest coverage for new helpers/pipeline branches.
+- Keep smoke scripts current when behaviour shifts; document manual/smoke steps in `tests/README.md`.
+- Prefer fast, focused tests over broad mocks; wire tests should reflect real env defaults.
 
 ## Change Management
 - Use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`). Keep `npm test` green.
 - Behavioural changes without matching spec updates should be treated as incomplete.
+- Before pushing: run backend tests; run UI lint/tests if UI touched; rerun smoke if pipeline/ports changed.
 
 ## Security Notes
 - Store tokens/keys via env or secret manager; do not commit live credentials.
 - New routes should flow through the inspection pipeline unless explicitly exempted and documented. Keep forward-proxy allowlists minimal.
+- When adding third-party calls, document hosts in allowlist logic and tighten scope.
+
+## PR / MR Checklist
+- Specs updated when behaviour changes.
+- Tests/lint pass for touched areas; smoke run noted when relevant.
+- Configurable values exposed via env or persisted store, never literals.
+- Logs use `lower_snake_case` fields; sensitive values not logged.
+- Forward proxy and inspection pipeline behaviour remains documented and covered by tests.
