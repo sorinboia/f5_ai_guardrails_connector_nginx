@@ -1,56 +1,39 @@
-# Repository Guidelines
+# Coding Agent Handbook
 
-## Project Structure & Module Organization
-- Primary runtime is the Fastify-based proxy in `node/src/server.js`; request/response/stream inspection lives under `node/src/pipeline/` with shared config/helpers in `node/src/config/` and `node/src/utils/`. The forward proxy listener is implemented in `node/src/forwardProxy.js`.
-- HTTP/HTTPS data-plane entrypoints default to ports 22080/22443 (certs in `certs/`); the management UI/APIs are served separately on port 22100. Static UI assets are served from `html/`. Runtime config persistence uses `var/guardrails_config.json` by default. Forward proxy listens on port 10000 and only allows destinations present in the config store.
-- Legacy MITM sidecar assets remain in the repo but are no longer started; forward proxying is handled in-process by Node.
-- Tests and smoke flows live in `tests/`; keep fixtures and scripts there and align coverage notes in `tests/README.md` when you add or change cases.
+Quick context for anyone making changes in this repo. Keep specs and behaviour in sync.
 
-## Refactoring Plan
-- `REFACTOR.md` at the repo root is the source of truth for the ongoing Node proxy/pipeline refactor. Keep it updated with decisions, milestone status, and scope changes until the effort is finished.
-- New refactor PRs should link back to the relevant milestones in `REFACTOR.md` and avoid behavioural drift from `SPEC.md` unless updated in the same change set.
+## What This Repo Contains
+- Fastify-based proxy that inspects/forwards HTTP(S) traffic: main entry `node/src/server.js`; pipeline helpers under `node/src/pipeline/`; config/env/storage under `node/src/config/`; forward proxy in `node/src/forwardProxy.js`.
+- React/Tailwind management UI served from the backend under `/config/ui`; source in `ui/`, built assets in `html/`.
+- Config persists to `var/guardrails_config.json` (path overrideable). Forward proxy allowlist is derived from this store.
 
-### New UI Tracking
-- While the new React/Tailwind management UI is in progress, every meaningful UI change must also update the **Status** and **Next** sections of `NEW_UI_PLAN.md` in the same change set to keep progress synchronized.
+## Specs to Read First
+- `SPEC.md` — system overview and document ownership rules.
+- `SPEC_BACKEND.md` — authoritative for ports, endpoints, pipeline stages, env defaults, persistence, invariants.
+- `SPEC_FRONTEND.md` — authoritative for UI routes, API contracts, validation, build/dev settings.
+If you change behaviour or contracts, update the relevant spec(s) in the same change set.
 
-## Specification (SPEC.md)
-- `SPEC.md` at the repo root is the authoritative contract for the Node connector: endpoints, headers, pipeline stages, shared stores, defaults, and invariants.
-- **Any behaviour change requires a matching `SPEC.md` update in the same change set.** Keep the spec in lockstep with implementation and tests.
-- Read it first before modifying flows; reviewers should reject changes that drift from or omit spec updates.
+## Runtime Topology
+- Ports: data HTTP `22080`; data HTTPS `22443` when cert/key present; management/UI `22100`; forward proxy `10000` (can disable via `FORWARD_PROXY_ENABLED=false`).
+- TLS assets in `certs/`; static UI served from `html/`.
 
+## Dev & Build Commands
+- Backend dev: `cd node && npm install && npm run dev` (uses env defaults; HTTPS starts when certs exist). Prod: `npm start`.
+- Backend tests: `cd node && npm test` (Vitest). Smoke: `tests/smoke/node-shadow.sh`.
+- UI dev: `cd ui && npm install && npm run dev` (Vite on 5173 with proxy to 22100). UI build: `npm run build`; tests: `npm test`; lint: `npm run lint`.
+- Docker: `docker build -t sorinboiaf5/f5-ai-connector:latest .` then run with `-p 22080:22080 [-p 22443:22443] -p 22100:22100 -p 10000:10000` and required env vars.
 
-## Build, Test, and Development Commands
-- Install and run locally: `cd node && npm install`, then `npm run dev` (data HTTP 22080; data HTTPS 22443 when `HTTPS_CERT`/`HTTPS_KEY` are present; management HTTP 22100). Use `npm start` for production-mode runs.
-- Unit tests: `cd node && npm test` (Vitest). Smoke tests: `tests/smoke/node-shadow.sh` spins up stubs and exercises pass/block/redact/stream flows.
-- Docker (Node-only): `docker build -t sorinboiaf5/f5-ai-connector:latest .` then `docker run --rm -p 22080:22080 -p 22443:22443 -p 22100:22100 -p 10000:10000 -e BACKEND_ORIGIN=... -e SIDEBAND_URL=... -e SIDEBAND_BEARER=... sorinboiaf5/f5-ai-connector:latest`. Forward proxy is enabled by default on port 10000; disable with `FORWARD_PROXY_ENABLED=false` if not needed.
-- Quick smoke via curl (proxy path):
-```bash
-curl http://localhost:22080/api/chat -H "content-type: application/json" -d '{
-  "model": "llama3.1:8b",
-  "messages": [
-    { "role": "system", "content": "You are a helpful assistant." },
-    { "role": "user", "content": "Write me a haiku about open-source AI." }
-  ],
-  "stream": false
-}'
-```
-Inspect Node logs (stdout) for guardrail decisions; swap to `https://localhost:22443` when HTTPS is configured. Management UI/API live on `http://localhost:22100`.
+## Coding Style
+- JS/TS: ES modules, two-space indent, `camelCase` for vars/functions, `UPPER_SNAKE_CASE` for constants, log fields `lower_snake_case`. Keep comments intent-focused.
+- Config must come from env or the store; never hard-code secrets.
 
-## Coding Style & Naming Conventions
-- JavaScript/Node uses ES modules with two-space indentation. Keep log field names in `lower_snake_case` for telemetry parity; use `camelCase` for variables/functions and `UPPER_SNAKE_CASE` for constants.
-- Functions should read as verbs (e.g., `buildProxy`, `runPipeline`). Keep comments high-level and intent-focused.
-- Configuration comes from environment variables or the persisted config store; never hard-code secrets.
+## Testing & Coverage
+- Add targeted Vitest coverage for new helpers/pipeline branches. Keep smoke scripts current when behaviour shifts; document manual/smoke steps in `tests/README.md`.
 
-## Testing Guidelines
-- Prefer targeted unit coverage with Vitest for new helpers or pipeline branches. Add fixtures where behaviour depends on request/response bodies.
-- Document any manual or smoke scenarios in `tests/README.md` when you add or modify tests or scripts.
-- Ensure new endpoints or pipeline toggles are exercised in smoke scripts when practical.
+## Change Management
+- Use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`). Keep `npm test` green.
+- Behavioural changes without matching spec updates should be treated as incomplete.
 
-## Commit & Pull Request Guidelines
-- Use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`). Each commit should keep `npm test` green.
-- PRs should cite relevant spec/migration items, summarize behavioural impacts, and include logs or evidence of guardrail decisions when behaviour changes.
-
-## Security & Configuration Tips
-- Store Calypso/Guardrails tokens in environment variables or external secret managers; do not commit live keys.
-- New routes should pass through the inspection pipeline unless explicitly exempted and documented in `SPEC.md` with rationale.
-- Respect inspection mode toggles (`both`, `request`, `response`, `off`) and ensure forward-proxy allowlists remain least-privilege and documented.
+## Security Notes
+- Store tokens/keys via env or secret manager; do not commit live credentials.
+- New routes should flow through the inspection pipeline unless explicitly exempted and documented. Keep forward-proxy allowlists minimal.
