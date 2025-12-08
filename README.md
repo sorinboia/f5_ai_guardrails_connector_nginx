@@ -1,60 +1,52 @@
-# F5 AI Guardrails Node Connector
+# F5 AI Guardrails Connector
 
-This repository now runs a Fastify-based reverse proxy (Node.js) that replaces the previous NGINX+njs stack. It preserves the same behaviour documented in `SPEC.md`: request/response/stream inspection, optional redaction, collector quotas, management APIs, static UI, and a Node-implemented forward proxy. All NGINX configs and njs scripts have been removed.
+Fastify-based reverse proxy that applies Calypso Guardrails scanning to AI traffic. It inspects requests, responses, and streaming chunks before forwarding to your configured upstream. A management UI/API lets you edit allowlists, patterns, and keys, while an in-process forward proxy enforces host allowlists and still routes through the same inspection pipeline.
 
 ## What it does
-- Proxies AI traffic on HTTP `:22080` (and HTTPS `:22443` when certs are present).
-- Exposes the management UI/APIs separately on HTTP `:22100`.
-- Inspects requests, responses, and streaming chunks via the Guardrails Scan API; blocks or redacts as instructed.
-- Provides a forward proxy on `:10000` that only permits destinations present in the config store and forwards allowed traffic into the local data-plane listeners for inspection.
+- Listens on data-plane HTTP `22080` and optional HTTPS `22443` when cert/key are present.
+- Serves management UI/APIs on `22100` (`/config/ui`, `/config/api*`, `/collector/api`).
+- Runs the Guardrails inspection pipeline against all proxied traffic (bypass only for `/api/tags`).
+- Forward proxy on `10000` enforces destinations stored in the config file and relays into the data-plane listeners so inspection always applies.
 
-## Run locally
+## Run with Docker
 ```bash
-cd /etc/nginx/node
-npm install
-npm run dev        # HTTP 22080; HTTPS 22443 if certs in /etc/nginx/certs
-```
-Environment toggles (mirrors SPEC defaults):
-- `BACKEND_ORIGIN` (default `https://api.openai.com`)
-- `SIDEBAND_URL` (default `https://www.us1.calypsoai.app/backend/v1/scans`)
-- `SIDEBAND_BEARER`, `SIDEBAND_UA`, `SIDEBAND_TIMEOUT_MS`
-- `CA_BUNDLE` (default `/etc/ssl/certs/ca-certificates.crt`)
-- `HTTP_PORT` (default `22080`), `HTTPS_PORT` (default `22443`), `MANAGEMENT_PORT` (default `22100`), `HTTPS_CERT`, `HTTPS_KEY`
-- `FORWARD_PROXY_PORT` (default `10000`), `FORWARD_PROXY_ENABLED` (default `true`)
-- `CONFIG_STORE_PATH` (default `var/guardrails_config.json`)
-
-## Docker image (Node-only)
-```
+# build the image from this repo
 docker build -t sorinboiaf5/f5-ai-connector:latest .
-docker run --rm -p 22080:22080 -p 22443:22443 -p 22100:22100 -p 10000:10000 \
-  -e BACKEND_ORIGIN=https://api.openai.com \
-  -e SIDEBAND_URL=https://www.us1.calypsoai.app/backend/v1/scans \
+
+# run with required ports and your Guardrails token
+docker run --rm \
+  -p 22080:22080 -p 22443:22443 -p 22100:22100 -p 10000:10000 \
   -e SIDEBAND_BEARER=your_token_here \
   sorinboiaf5/f5-ai-connector:latest
 ```
-- Forward proxy: define destinations in the config store (via management API/UI). Only listed hosts are allowed; traffic is relayed into the local HTTP/HTTPS listeners so inspection still applies.
+Common options to add:
+- Mount config store for persistence: `-v $(pwd)/var:/app/var`
+- Bring your own cert/key: `-v $(pwd)/certs:/app/certs -e HTTPS_CERT=certs/server.crt -e HTTPS_KEY=certs/server.key`
+- Disable forward proxy: `-e FORWARD_PROXY_ENABLED=false`
 
-## Key endpoints
-- Proxy: any path except `/config/*` and `/collector/*` → full inspection pipeline.
-- Bypass: `/api/tags` proxies upstream without inspection.
-- Management APIs: `/config/api`, `/config/api/keys`, `/config/api/patterns`, `/collector/api`.
-- UI: `/config/ui`, `/config/ui/keys`, `/config/ui/patterns`; redirects remain (`/collector/ui`).
-- Forward proxy: HTTP absolute-form requests and `CONNECT` to port `10000` (dest must exist in config).
+## Environment variables
+Defaults come from `node/src/config/env.js` and are restated in `SPEC_BACKEND.md`.
+- `BACKEND_ORIGIN` (default `https://api.openai.com`): upstream to forward inspected traffic.
+- `SIDEBAND_URL` (default `https://www.us1.calypsoai.app/backend/v1/scans`): Guardrails scan endpoint.
+- `SIDEBAND_BEARER` (no default): bearer token for Guardrails API.
+- `SIDEBAND_UA` (default `njs-sideband/1.0`), `SIDEBAND_TIMEOUT_MS` (default `5000`).
+- `HTTP_PORT` `22080`, `HTTPS_PORT` `22443`, `MANAGEMENT_PORT` `22100`.
+- `HTTPS_CERT`/`HTTPS_KEY` (defaults `certs/sideband-local.crt` and `.key`), HTTPS turns on only when both files exist.
+- `DYNAMIC_CERTS_ENABLED` (`false`), `MITM_CA_CERT`, `MITM_CA_KEY`, `MITM_CERT_VALIDITY_DAYS` (`365`): enable per-host MITM cert issuance.
+- `FORWARD_PROXY_ENABLED` (`true`), `FORWARD_PROXY_PORT` (`10000`).
+- `CONFIG_STORE_PATH` (`var/guardrails_config.json`): persisted hosts/keys/patterns/collector config.
+- `CA_BUNDLE` (`/etc/ssl/certs/ca-certificates.crt`): trust bundle for upstream TLS.
+- `LOG_LEVEL` (`info`).
 
-## Testing
-- Unit + helpers: `cd node && npm test` (Vitest).
-- Smoke (Node shadow): `tests/smoke/node-shadow.sh` spins up stub servers and exercises pass/block/redact/stream flows on alt ports.
+## Local development
+```bash
+cd node
+npm install
+npm run dev    # HTTP on 22080; HTTPS on 22443 when certs exist in ./certs
+```
+Management UI is served from the same process at `http://localhost:22100/config/ui`.
 
-## File tour
-- `node/src/server.js` — Fastify bootstrap + HTTPS optional listener.
-- `node/src/forwardProxy.js` — Node forward proxy that validates destinations and relays to local listeners.
-- `node/src/pipeline/*` — inspection, redaction, streaming, collector, Guardrails client.
-- `node/src/config/*` — env loading, store persistence (`var/guardrails_config.json`), validation.
-- `node/src/routes/*` — management routes, static asset routes, proxy pipeline.
-- `html/` — UI bundle served by Fastify static routes.
-- `certs/` — local TLS materials for optional HTTPS listener.
-
-## Smoke curl example
+## Smoke test curl
 ```bash
 curl http://localhost:22080/api/chat -H "content-type: application/json" -d '{
   "model": "llama3.1:8b",
@@ -65,4 +57,4 @@ curl http://localhost:22080/api/chat -H "content-type: application/json" -d '{
   "stream": false
 }'
 ```
-Inspect Node logs (stdout) to confirm inspection decisions. If HTTPS is enabled, use `https://localhost:22443` with the matching cert. Management UI/API live on `http://localhost:22100`.
+Watch container logs for inspection outcomes; switch to `https://localhost:22443` when you supply TLS assets. The management UI/API stay on `http://localhost:22100`.
