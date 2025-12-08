@@ -1,0 +1,11 @@
+.git
+node/node_modules
+ui/node_modules
+ui/dist
+*.log
+npm-debug.log
+node/npm-debug.log
+ui/npm-debug.log
+.DS_Store
+# Runtime/persisted config should stay out of images
+var/guardrails_config.json

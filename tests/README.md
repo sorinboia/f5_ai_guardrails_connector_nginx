@@ -26,8 +26,10 @@ Tests now target the Fastify/Node connector (NGINX is retired). This file invent
 - **Backend Client & Dispatcher**: request header filtering, buffered fetch, passthrough streaming drop on live block, abortable upstream start, CA bundle caching/fallback.
 - **Store Persistence & Allowlist**: store shape validation/fallback, host normalization, forward-proxy allowlist helper.
 - **Logging & Telemetry**: pattern_result fields, log-level override via `X-Sideband-Log`.
+- **UI Validation (ui/src/__tests__)**: form schemas for host config, API keys, and pattern rules mirror backend constraints (enum ranges, status bounds, matcher requirements). RTL coverage now includes API Keys and Pattern Rules pagination/search UX.
 
 ## Execution Helpers
+- **UI Build Smoke**: `tests/smoke/ui-build.sh` builds the React UI (runs `npm run build:ui` which copies `ui/dist` into `html/`), boots the management listener on an isolated port (`MANAGEMENT_PORT` default 23100; HTTP/HTTPS 23080/23443; forward proxy disabled), and curls `/config/ui` plus `/config/ui/patterns` to verify the SPA fallback. Uses a temporary config store; logs land in `/tmp/guardrails-ui-smoke.log`.
 - **Smoke**: `tests/smoke/node-shadow.sh` (uses stub servers, temporary config store). Review logs under `/tmp/node-shadow-*`.
 - **Integration (to port)**: Legacy bash cases can be repointed to the Node server by setting `HTTP_PORT` and `CONFIG_STORE_PATH` env vars when starting `node/src/server.js`. Reuse the stub servers in `tests/servers/stub_servers.py`.
 

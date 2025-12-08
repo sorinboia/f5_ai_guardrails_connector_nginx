@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { ArrowUpRight, BookOpen, Menu, X } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
+import { Select } from '@/components/ui/select'
 import { navSections, findNavItem } from '@/lib/constants/navigation'
 import { cn } from '@/lib/utils'
+import { useActiveHost } from '@/lib/hooks/use-active-host'
+import { useHostConfig } from '@/lib/hooks/use-config'
 
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -36,9 +37,6 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-foreground">{item.label}</span>
                   </div>
-                  {item.description ? (
-                    <p className="text-xs text-muted-foreground">{item.description}</p>
-                  ) : null}
                 </div>
               </NavLink>
             ))}
@@ -63,26 +61,11 @@ function Brand() {
   )
 }
 
-function StatusPill() {
-  return (
-    <Badge variant="muted" className="gap-1 border-border bg-white/70 text-xs font-medium shadow-subtle">
-      <span className="h-2 w-2 rounded-full bg-success shadow-[0_0_0_4px_rgba(14,165,233,0.25)]" aria-hidden />
-      Live on port 22100
-    </Badge>
-  )
-}
-
-function HostSelectorPlaceholder() {
-  return (
-    <Button variant="outline" size="sm" className="border-dashed">
-      Active host: __default__
-    </Button>
-  )
-}
-
 export function AppShell() {
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const { host, setHost } = useActiveHost()
+  const { data: hostData, isFetching } = useHostConfig(host)
 
   const basePath = (import.meta.env.BASE_URL || '').replace(/\/$/, '')
   const relativePath = basePath && location.pathname.startsWith(basePath)
@@ -97,22 +80,9 @@ export function AppShell() {
         <aside className="relative hidden min-h-screen border-r bg-card/70 pb-10 pt-8 backdrop-blur md:flex md:flex-col">
           <div className="flex items-center justify-between px-5 pb-6">
             <Brand />
-            <StatusPill />
           </div>
           <div className="flex-1 overflow-y-auto px-5">
             <SidebarLinks />
-          </div>
-          <Separator className="my-4" />
-          <div className="px-5 text-xs text-muted-foreground">
-            <p className="font-medium text-foreground">Need the API contract?</p>
-            <a
-              className="inline-flex items-center gap-1 text-accent underline-offset-2 hover:underline"
-              href="/SPEC.md"
-              target="_blank"
-              rel="noreferrer"
-            >
-              SPEC.md <ArrowUpRight className="h-3.5 w-3.5" />
-            </a>
           </div>
         </aside>
 
@@ -136,13 +106,18 @@ export function AppShell() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <HostSelectorPlaceholder />
-              <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" asChild>
-                <a href="/SPEC.md" target="_blank" rel="noreferrer">
-                  <BookOpen className="h-4 w-4" />
-                  SPEC
-                </a>
-              </Button>
+              <Select
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+                className="h-9 w-44 border-dashed text-sm"
+                aria-label="Active host"
+              >
+                {(hostData?.hosts || ['__default__']).map((h) => (
+                  <option key={h} value={h}>
+                    {h}{isFetching && h === host ? ' •' : ''}
+                  </option>
+                ))}
+              </Select>
             </div>
           </header>
 

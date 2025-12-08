@@ -1,0 +1,13 @@
+{
+  "name": "f5-ai-guardrails-root",
+  "private": true,
+  "scripts": {
+    "dev:all": "bash scripts/dev-all.sh",
+    "dev:ui": "npm run dev --prefix ui",
+    "build:ui": "npm run build --prefix ui && mkdir -p html && rm -rf html/* && cp -r ui/dist/* html/",
+    "smoke:ui": "bash tests/smoke/ui-build.sh",
+    "preview:ui": "npm run preview --prefix ui",
+    "lint:ui": "npm run lint --prefix ui",
+    "test:ui": "npm run test --prefix ui"
+  }
+}

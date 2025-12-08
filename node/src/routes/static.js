@@ -2,12 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
+import proxy from '@fastify/http-proxy';
 
 // Serve static UI assets from the local repo by default so live reload picks up changes.
 // If a container binds a different path, override with UI_ROOT env (optional future hook).
 const UI_ROOT = path.resolve('../html');
 const MITM_HTTP_ROOT = '/var/lib/mitmproxy';
 const MITM_HTTPS_ROOT = '/root/.mitmproxy';
+const UI_DEV_ORIGIN = process.env.UI_DEV_ORIGIN;
 
 function mitmBasePath(request) {
   return request.protocol === 'https' ? MITM_HTTPS_ROOT : MITM_HTTP_ROOT;
@@ -28,11 +30,40 @@ function getActiveCaPath(appConfig) {
 }
 
 async function staticRoutes(fastify) {
-  // Decorate reply with sendFile without auto-registering directory handlers.
+  // In dev, let Vite serve the UI directly to keep HMR and source maps.
+  if (UI_DEV_ORIGIN) {
+    // Avoid the Vite "configured with a public base" helper when the slash is missing.
+    fastify.get('/config/ui', async (_, reply) => reply.redirect(302, '/config/ui/'));
+
+    fastify.register(proxy, {
+      upstream: UI_DEV_ORIGIN,
+      prefix: '/config/ui/',
+      rewritePrefix: '/config/ui/',
+      internalRewriteLocationHeader: false
+    });
+
+    // Proxy Vite asset endpoints that are requested with absolute paths.
+    ['/@vite', '/src', '/node_modules', '/assets'].forEach((prefix) => {
+      fastify.register(proxy, {
+        upstream: UI_DEV_ORIGIN,
+        prefix
+      });
+    });
+    return;
+  }
+
+  // Serve SPA assets for the management UI with explicit no-store headers.
   fastify.register(fastifyStatic, {
     root: UI_ROOT,
-    serve: false,
+    prefix: '/config/ui/',
     decorateReply: true,
+    // Avoid registering the plugin's own wildcard route so our SPA fallback below can own it.
+    wildcard: false,
+    index: false,
+    cacheControl: false,
+    setHeaders: (res) => {
+      res.setHeader('cache-control', 'no-store');
+    }
   });
 
   function noStore(reply) {
@@ -40,31 +71,15 @@ async function staticRoutes(fastify) {
     return reply;
   }
 
-  function sendHtml(reply) {
+  function sendSpa(reply) {
     noStore(reply).type('text/html; charset=utf-8');
-    return reply.sendFile('scanner-config.html');
+    return reply.sendFile('index.html');
   }
 
-  fastify.get('/config/ui', async (_, reply) => sendHtml(reply));
-  fastify.get('/config/ui/keys', async (_, reply) => sendHtml(reply));
-  fastify.get('/config/ui/patterns', async (_, reply) => sendHtml(reply));
-
-  fastify.get('/config/ui/', async (_, reply) => reply.redirect(302, '/config/ui'));
-  fastify.get('/config/ui/keys/', async (_, reply) => reply.redirect(302, '/config/ui/keys'));
-  fastify.get('/config/ui/patterns/', async (_, reply) => reply.redirect(302, '/config/ui/patterns'));
+  fastify.get('/config/ui', async (_, reply) => sendSpa(reply));
+  fastify.get('/config/ui/', async (_, reply) => sendSpa(reply));
+  fastify.get('/config/ui/*', async (request, reply) => sendSpa(reply));
   fastify.get('/collector/ui', async (_, reply) => reply.redirect(302, '/config/ui'));
-
-  fastify.get('/config/css/*', async (request, reply) => {
-    const target = path.posix.join('css', request.params['*'] || '');
-    noStore(reply).type('text/css; charset=utf-8');
-    return reply.sendFile(target);
-  });
-
-  fastify.get('/config/js/*', async (request, reply) => {
-    const target = path.posix.join('js', request.params['*'] || '');
-    noStore(reply).type('application/javascript; charset=utf-8');
-    return reply.sendFile(target);
-  });
 
   async function serveActiveCa(request, reply, contentType) {
     const caPath = getActiveCaPath(fastify.appConfig);
