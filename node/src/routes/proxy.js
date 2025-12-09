@@ -24,7 +24,8 @@ async function proxyRoutes(fastify, opts) {
 
   // /api/tags passthrough without inspection.
   fastify.register(proxy, {
-    upstream: backendOrigin,
+    // Upstream is resolved per-request so host-specific backendOrigin is honored.
+    upstream: '',
     prefix: '/api/tags',
     rewritePrefix: '/api/tags',
     http2: false,

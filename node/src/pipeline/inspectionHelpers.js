@@ -7,6 +7,8 @@ import {
 import { collectRedactionPlan, applyRedactions, extractContextPayload } from './redaction.js';
 import { callSideband } from './sidebandClient.js';
 
+const EXTRACT_PREVIEW_LIMIT = 4000;
+
 function evaluateMatchers(parsed, matchers = []) {
   if (!matchers.length) return { matched: true };
   if (!parsed) return { matched: false, reason: 'no_json' };
@@ -53,6 +55,17 @@ function selectApiKeyForPattern(context, pattern, apiKeys, defaultBearer, logger
   } else {
     logger.debug({ step: `${phase}:pattern_no_matchers`, pattern_id: pattern.id });
   }
+
+  const extractedText = typeof context?.extracted === 'string' ? context.extracted : '';
+  const truncated = extractedText.length > EXTRACT_PREVIEW_LIMIT;
+  logger?.debug?.({
+    step: `${phase}:pattern_match_extracted`,
+    pattern_id: pattern.id,
+    api_key_name: pattern.apiKeyName || null,
+    extracted: truncated ? `${extractedText.slice(0, EXTRACT_PREVIEW_LIMIT)}...` : extractedText,
+    extracted_length: extractedText.length,
+    extracted_truncated: truncated
+  });
 
   const record = (apiKeys || []).find((k) => k.name === pattern.apiKeyName);
   if (!record || !record.key) {

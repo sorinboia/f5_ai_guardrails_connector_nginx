@@ -105,17 +105,11 @@ export default function PatternRulesPage() {
             : [{ path: '', equals: '', contains: '', exists: false }],
         notes: editingItem.notes || '',
       })
-      matcherArray.replace(
-        editingItem.matchers.length > 0
-          ? editingItem.matchers
-          : defaultFormValues.matchers
-      )
     }
-  }, [editingItem, form, matcherArray])
+  }, [editingItem, form])
 
   const resetToDefaults = () => {
     form.reset(defaultFormValues)
-    matcherArray.replace(defaultFormValues.matchers)
   }
 
   const openCreate = () => {
