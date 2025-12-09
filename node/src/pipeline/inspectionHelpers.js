@@ -11,17 +11,27 @@ function evaluateMatchers(parsed, matchers = []) {
   if (!matchers.length) return { matched: true };
   if (!parsed) return { matched: false, reason: 'no_json' };
 
+  const normalizeComparator = (val) => {
+    if (val === undefined || val === null) return undefined;
+    if (typeof val === 'string' && val.trim() === '') return undefined;
+    return val;
+  };
+
   for (let i = 0; i < matchers.length; i++) {
     const m = matchers[i];
     if (!m || typeof m.path !== 'string') return { matched: false, reason: 'invalid_matcher', index: i };
     const accessor = getPathAccessor(parsed, m.path);
     const value = accessor ? accessor.value : undefined;
     const exists = accessor !== undefined;
+
+    const equals = normalizeComparator(m.equals);
+    const contains = normalizeComparator(m.contains);
+
     if (m.exists === true && !exists) return { matched: false, reason: 'exists_false', path: m.path };
-    if (m.equals !== undefined && value !== m.equals) return { matched: false, reason: 'equals_mismatch', path: m.path };
-    if (m.contains !== undefined) {
+    if (equals !== undefined && value !== equals) return { matched: false, reason: 'equals_mismatch', path: m.path };
+    if (contains !== undefined) {
       const str = value === undefined || value === null ? '' : String(value);
-      if (!str.includes(m.contains)) return { matched: false, reason: 'contains_mismatch', path: m.path };
+      if (!str.includes(contains)) return { matched: false, reason: 'contains_mismatch', path: m.path };
     }
   }
   return { matched: true };

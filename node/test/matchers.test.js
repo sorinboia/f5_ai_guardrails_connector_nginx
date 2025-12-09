@@ -34,6 +34,17 @@ describe('evaluateMatchers', () => {
     expect(bad.matched).toBe(false);
     expect(bad.reason).toBe('exists_false');
   });
+
+  it('ignores empty equals/contains values to avoid false mismatches', () => {
+    const parsed = { messages: [{ content: 'hello' }] };
+    const res = evaluateMatchers(parsed, [{
+      path: '.messages[-1].content',
+      equals: '',
+      contains: '',
+      exists: true
+    }]);
+    expect(res.matched).toBe(true);
+  });
 });
 
 describe('selectApiKeyForPattern', () => {
