@@ -9,7 +9,30 @@ import { callSideband } from './sidebandClient.js';
 
 const EXTRACT_PREVIEW_LIMIT = 4000;
 
-function evaluateMatchers(parsed, matchers = []) {
+function evaluateUrlMatcher(urlRegex, requestUrl) {
+  // URL regex is required - if not configured, pattern doesn't match
+  if (!urlRegex || (typeof urlRegex === 'string' && !urlRegex.trim())) {
+    return { matched: false, reason: 'no_url_regex_configured' };
+  }
+  if (!requestUrl) return { matched: false, reason: 'no_url' };
+  try {
+    const regex = new RegExp(urlRegex);
+    if (!regex.test(requestUrl)) {
+      return { matched: false, reason: 'url_regex_mismatch', urlRegex, requestUrl };
+    }
+    return { matched: true };
+  } catch (e) {
+    return { matched: false, reason: 'invalid_url_regex', urlRegex, error: e.message };
+  }
+}
+
+function evaluateMatchers(parsed, matchers = [], options = {}) {
+  const { urlRegex, requestUrl } = options;
+
+  // Check URL regex first if specified
+  const urlResult = evaluateUrlMatcher(urlRegex, requestUrl);
+  if (!urlResult.matched) return urlResult;
+
   if (!matchers.length) return { matched: true };
   if (!parsed) return { matched: false, reason: 'no_json' };
 
@@ -39,21 +62,33 @@ function evaluateMatchers(parsed, matchers = []) {
   return { matched: true };
 }
 
-function selectApiKeyForPattern(context, pattern, apiKeys, defaultBearer, logger, phase) {
+function selectApiKeyForPattern(context, pattern, apiKeys, defaultBearer, logger, phase, requestUrl) {
   if (!pattern) return { bearer: defaultBearer, matched: true, shouldRun: true };
   const parsed = context?.parsed;
-  if (Array.isArray(pattern.matchers) && pattern.matchers.length) {
-    if (!parsed) {
-      logger.debug({ step: `${phase}:pattern_no_json`, pattern_id: pattern.id });
-      return { bearer: defaultBearer, matched: false, shouldRun: false, apiKeyName: pattern.apiKeyName, patternId: pattern.id };
-    }
-    const evaluation = evaluateMatchers(parsed, pattern.matchers);
-    if (!evaluation.matched) {
-      logger.debug({ step: `${phase}:pattern_miss`, pattern_id: pattern.id, reason: evaluation.reason, path: evaluation.path || null });
-      return { bearer: defaultBearer, matched: false, shouldRun: false, apiKeyName: pattern.apiKeyName, patternId: pattern.id };
-    }
-  } else {
-    logger.debug({ step: `${phase}:pattern_no_matchers`, pattern_id: pattern.id });
+  const hasMatchers = Array.isArray(pattern.matchers) && pattern.matchers.length;
+  const hasUrlRegex = pattern.urlRegex && typeof pattern.urlRegex === 'string' && pattern.urlRegex.trim();
+
+  // If there are body matchers but no parsed JSON, skip (unless we only have URL matching)
+  if (hasMatchers && !parsed) {
+    logger.debug({ step: `${phase}:pattern_no_json`, pattern_id: pattern.id });
+    return { bearer: defaultBearer, matched: false, shouldRun: false, apiKeyName: pattern.apiKeyName, patternId: pattern.id };
+  }
+
+  // URL regex is required for pattern matching
+  const evaluation = evaluateMatchers(parsed, hasMatchers ? pattern.matchers : [], {
+    urlRegex: hasUrlRegex ? pattern.urlRegex : null,
+    requestUrl
+  });
+  if (!evaluation.matched) {
+    logger.debug({
+      step: `${phase}:pattern_miss`,
+      pattern_id: pattern.id,
+      reason: evaluation.reason,
+      path: evaluation.path || null,
+      urlRegex: evaluation.urlRegex || null,
+      requestUrl: evaluation.requestUrl || null
+    });
+    return { bearer: defaultBearer, matched: false, shouldRun: false, apiKeyName: pattern.apiKeyName, patternId: pattern.id };
   }
 
   const extractedText = typeof context?.extracted === 'string' ? context.extracted : '';
@@ -103,7 +138,8 @@ async function runInspectionPhase(opts) {
     log,
     sideband,
     pattern,
-    apiKeys
+    apiKeys,
+    requestUrl
   } = opts;
 
   if (!inspectEnabled) {
@@ -111,7 +147,7 @@ async function runInspectionPhase(opts) {
   }
 
   const context = extractContextPayload(bodyText, paths, log, phase);
-  const keyDecision = selectApiKeyForPattern(context, pattern, apiKeys, sideband.bearer, log, phase);
+  const keyDecision = selectApiKeyForPattern(context, pattern, apiKeys, sideband.bearer, log, phase, requestUrl);
   if (keyDecision.shouldRun === false) {
     return {
       status: 'skipped_no_match',
@@ -214,7 +250,8 @@ async function processInspectionStage(opts) {
     parallelExtractors,
     sideband,
     apiKeys,
-    log
+    log,
+    requestUrl
   } = opts;
 
   if (!inspectEnabled) return { status: 'skipped', body };
@@ -232,7 +269,8 @@ async function processInspectionStage(opts) {
       log,
       sideband,
       pattern,
-      apiKeys
+      apiKeys,
+      requestUrl
     })));
 
     const executed = results.filter((r) => r.status !== 'skipped' && r.status !== 'skipped_no_match');
@@ -257,7 +295,8 @@ async function processInspectionStage(opts) {
       log,
       sideband,
       pattern,
-      apiKeys
+      apiKeys,
+      requestUrl
     });
     if (result.status === 'blocked') return result;
     if (result.bodyText !== undefined) currentBody = result.bodyText;

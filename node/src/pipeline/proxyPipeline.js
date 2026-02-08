@@ -146,6 +146,8 @@ export class ProxyHandler {
 
     const upstreamUrl = new URL(request.raw.url || request.url || '/', config.backendOrigin || appCfg.backendOrigin);
     const upstreamHost = upstreamUrl.host;
+    // Capture the original request URL (path + query) for pattern URL matching
+    const requestUrl = request.raw.url || request.url || '/';
 
     return {
       store,
@@ -171,6 +173,7 @@ export class ProxyHandler {
       parallelForward,
       upstreamUrl,
       upstreamHost,
+      requestUrl,
       sideband: this.buildSidebandConfig(appCfg, request),
       dropPassthroughStream: (meta) => this.dropPassthroughStream(request, reply, meta)
     };
@@ -192,7 +195,8 @@ export class ProxyHandler {
       parallelExtractors: ctx.parallelRequestExtractors,
       sideband: ctx.sideband,
       apiKeys: ctx.store.apiKeys,
-      log: request.log
+      log: request.log,
+      requestUrl: ctx.requestUrl
     });
   }
 
@@ -213,7 +217,8 @@ export class ProxyHandler {
         parallelExtractors: false,
         sideband: ctx.sideband,
         apiKeys: ctx.store.apiKeys,
-        log: request.log
+        log: request.log,
+        requestUrl: ctx.requestUrl
       });
       if (liveResult.status === 'blocked') {
         return {
@@ -241,7 +246,8 @@ export class ProxyHandler {
         parallelExtractors: false,
         sideband: ctx.sideband,
         apiKeys: ctx.store.apiKeys,
-        log: request.log
+        log: request.log,
+        requestUrl: ctx.requestUrl
       });
       if (chunkResult.status === 'blocked') {
         return {
@@ -272,7 +278,8 @@ export class ProxyHandler {
         parallelExtractors: false,
         sideband: ctx.sideband,
         apiKeys: ctx.store.apiKeys,
-        log: request.log
+        log: request.log,
+        requestUrl: ctx.requestUrl
       });
       if (fullResult.status === 'blocked') {
         if (ctx.stream.blockingAllowed) {
@@ -318,7 +325,8 @@ export class ProxyHandler {
       parallelExtractors: ctx.parallelResponseExtractors,
       sideband: ctx.sideband,
       apiKeys: ctx.store.apiKeys,
-      log: request.log
+      log: request.log,
+      requestUrl: ctx.requestUrl
     });
 
     if (responseResult.status === 'blocked') {

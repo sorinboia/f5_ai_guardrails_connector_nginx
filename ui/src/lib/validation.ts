@@ -50,6 +50,7 @@ const matcherSchema = z
     }
   })
 
+
 export const patternRuleFormSchema = z
   .object({
     id: z.string().optional(),
@@ -57,23 +58,35 @@ export const patternRuleFormSchema = z
     context: z.enum(['request', 'response', 'response_stream']),
     apiKeyName: z.string().min(1, 'API key required'),
     paths: z.string().optional(),
-    matchers: z.array(matcherSchema),
+    matchers: z.array(matcherSchema).optional(),
+    urlRegex: z.string().optional(),
     notes: z.string().optional(),
   })
   .superRefine((vals, ctx) => {
-    const requiresRules = vals.context !== 'response_stream'
-    if (requiresRules && (!vals.paths || !vals.paths.trim())) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Paths required unless context is response_stream',
-        path: ['paths'],
-      })
-    }
-    if (requiresRules && vals.matchers.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Add at least one matcher',
-        path: ['matchers'],
-      })
+    const requiresUrlRegex = vals.context !== 'response_stream'
+    if (requiresUrlRegex) {
+      // URL regex is required
+      if (!vals.urlRegex || !vals.urlRegex.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'URL regex is required',
+          path: ['urlRegex'],
+        })
+      } else {
+        // Validate it's a valid regex
+        try {
+          new RegExp(vals.urlRegex)
+        } catch {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Invalid regular expression',
+            path: ['urlRegex'],
+          })
+        }
+      }
+      // Matchers are optional but must be valid if provided
+      if (vals.matchers && vals.matchers.length > 0) {
+        // Matchers are validated by their own schema
+      }
     }
   })

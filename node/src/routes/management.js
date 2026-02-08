@@ -246,6 +246,16 @@ function validateMatcher(m) {
   return true;
 }
 
+function validateUrlRegex(urlRegex) {
+  if (!urlRegex || typeof urlRegex !== 'string' || !urlRegex.trim()) return { valid: true, urlRegex: '' };
+  try {
+    new RegExp(urlRegex);
+    return { valid: true, urlRegex: urlRegex.trim() };
+  } catch (e) {
+    return { valid: false, error: `invalid urlRegex: ${e.message}` };
+  }
+}
+
 function validatePatternPayload(payload, store) {
   const errors = [];
   const name = payload.name && payload.name.trim();
@@ -257,13 +267,18 @@ function validatePatternPayload(payload, store) {
 
   const paths = Array.isArray(payload.paths) ? payload.paths.map((p) => String(p)) : [];
   const matchers = Array.isArray(payload.matchers) ? payload.matchers : [];
+  const urlRegexResult = validateUrlRegex(payload.urlRegex);
+  if (!urlRegexResult.valid) errors.push(urlRegexResult.error);
+  const urlRegex = urlRegexResult.urlRegex || '';
+
   if (context !== 'response_stream') {
-    if (!paths.length) errors.push('paths required');
-    if (!matchers.length) errors.push('matchers required');
-    if (matchers.some((m) => !validateMatcher(m))) errors.push('invalid matcher');
+    // URL regex is required for pattern matching
+    if (!urlRegex) errors.push('urlRegex is required');
+    // Paths and matchers are optional but validated if present
+    if (matchers.length && matchers.some((m) => !validateMatcher(m))) errors.push('invalid matcher');
   }
 
-  return { errors, context, apiKeyName, name, paths, matchers };
+  return { errors, context, apiKeyName, name, paths, matchers, urlRegex };
 }
 
 async function patternsApi(fastify) {
@@ -277,7 +292,7 @@ async function patternsApi(fastify) {
   fastify.post('/config/api/patterns', async (request, reply) => {
     const payload = getBody(request);
     const store = fastify.store || defaultStore();
-    const { errors, context, apiKeyName, name, paths, matchers } = validatePatternPayload(payload, store);
+    const { errors, context, apiKeyName, name, paths, matchers, urlRegex } = validatePatternPayload(payload, store);
     if (errors.length) return respondJson(reply, 400, { error: 'validation_failed', errors });
     if (store.patterns.find((p) => p.name === name && p.context === context)) return respondJson(reply, 409, { error: 'name_exists' });
 
@@ -288,6 +303,7 @@ async function patternsApi(fastify) {
       apiKeyName,
       paths: context === 'response_stream' ? [] : paths,
       matchers: context === 'response_stream' ? [] : matchers,
+      urlRegex: context === 'response_stream' ? '' : urlRegex,
       notes: payload.notes || '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -305,7 +321,7 @@ async function patternsApi(fastify) {
     if (!existing) return respondJson(reply, 404, { error: 'not_found' });
 
     const next = { ...existing, ...payload };
-    const { errors, context, apiKeyName, name, paths, matchers } = validatePatternPayload(next, store);
+    const { errors, context, apiKeyName, name, paths, matchers, urlRegex } = validatePatternPayload(next, store);
     if (errors.length) return respondJson(reply, 400, { error: 'validation_failed', errors });
     if (store.patterns.find((p) => p.id !== existing.id && p.name === name && p.context === context)) return respondJson(reply, 409, { error: 'name_exists' });
 
@@ -314,6 +330,7 @@ async function patternsApi(fastify) {
     existing.apiKeyName = apiKeyName;
     existing.paths = context === 'response_stream' ? [] : paths;
     existing.matchers = context === 'response_stream' ? [] : matchers;
+    existing.urlRegex = context === 'response_stream' ? '' : urlRegex;
     existing.notes = next.notes || '';
     existing.updated_at = new Date().toISOString();
     saveStore(store, fastify.log, fastify.appConfig.storePath);

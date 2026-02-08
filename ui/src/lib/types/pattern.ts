@@ -14,6 +14,7 @@ export type PatternRule = {
   apiKeyName: string
   paths: string[]
   matchers: Matcher[]
+  urlRegex?: string
   notes?: string
   created_at: string
   updated_at: string

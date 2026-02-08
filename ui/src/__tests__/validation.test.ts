@@ -60,9 +60,9 @@ describe('apiKeyFormSchema', () => {
 })
 
 describe('patternRuleFormSchema', () => {
-  it('requires matchers for request/response contexts', () => {
+  it('requires urlRegex for request/response contexts', () => {
     const result = patternRuleFormSchema.safeParse({
-      name: 'missing',
+      name: 'missing-url',
       context: 'request',
       apiKeyName: 'default',
       paths: '/v1',
@@ -72,7 +72,46 @@ describe('patternRuleFormSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('allows response_stream without matchers', () => {
+  it('accepts pattern with urlRegex and no matchers', () => {
+    const result = patternRuleFormSchema.safeParse({
+      name: 'url-only',
+      context: 'request',
+      apiKeyName: 'default',
+      urlRegex: '^/v1/chat',
+      paths: '',
+      matchers: [],
+      notes: '',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts pattern with urlRegex and matchers', () => {
+    const result = patternRuleFormSchema.safeParse({
+      name: 'full-pattern',
+      context: 'request',
+      apiKeyName: 'default',
+      urlRegex: '^/v1/chat',
+      paths: '.messages',
+      matchers: [{ path: '.messages[-1].content', exists: true }],
+      notes: '',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects invalid regex', () => {
+    const result = patternRuleFormSchema.safeParse({
+      name: 'bad-regex',
+      context: 'request',
+      apiKeyName: 'default',
+      urlRegex: '[invalid(',
+      paths: '',
+      matchers: [],
+      notes: '',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('allows response_stream without urlRegex', () => {
     const result = patternRuleFormSchema.safeParse({
       name: 'stream-rule',
       context: 'response_stream',

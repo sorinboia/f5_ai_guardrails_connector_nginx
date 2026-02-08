@@ -47,7 +47,8 @@ const defaultFormValues: FormValues = {
   context: 'request',
   apiKeyName: '',
   paths: '',
-  matchers: [{ path: '', equals: '', contains: '', exists: false }],
+  matchers: [],
+  urlRegex: '',
   notes: '',
 }
 
@@ -99,10 +100,8 @@ export default function PatternRulesPage() {
         context: editingItem.context,
         apiKeyName: editingItem.apiKeyName,
         paths: toLines(editingItem.paths),
-        matchers:
-          editingItem.matchers.length > 0
-            ? editingItem.matchers
-            : [{ path: '', equals: '', contains: '', exists: false }],
+        matchers: editingItem.matchers.length > 0 ? editingItem.matchers : [],
+        urlRegex: editingItem.urlRegex || '',
         notes: editingItem.notes || '',
       })
     }
@@ -141,6 +140,7 @@ export default function PatternRulesPage() {
       (p) =>
         p.name.toLowerCase().includes(term) ||
         (p.notes || '').toLowerCase().includes(term) ||
+        (p.urlRegex || '').toLowerCase().includes(term) ||
         p.paths.some((path) => path.toLowerCase().includes(term)),
     )
   }, [patterns, contextFilter, search])
@@ -165,7 +165,8 @@ export default function PatternRulesPage() {
       context: values.context,
       apiKeyName: values.apiKeyName,
       paths: values.context === 'response_stream' ? [] : parseLines(values.paths),
-      matchers: values.context === 'response_stream' ? [] : values.matchers,
+      matchers: values.context === 'response_stream' ? [] : (values.matchers || []),
+      urlRegex: values.context === 'response_stream' ? '' : (values.urlRegex || ''),
       notes: values.notes || '',
     }
 
@@ -246,7 +247,7 @@ export default function PatternRulesPage() {
         actions={
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <Input
-              placeholder="Search name, note, or path"
+              placeholder="Search name, note, path, or URL pattern"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-9 w-48"
@@ -268,7 +269,7 @@ export default function PatternRulesPage() {
         }
       >
         {isLoading ? (
-          <TableSkeleton columns={5} rows={4} />
+          <TableSkeleton columns={6} rows={4} />
         ) : filtered.length ? (
           <Table>
             <THead>
@@ -276,6 +277,7 @@ export default function PatternRulesPage() {
                 <TH>Name</TH>
                 <TH>Context</TH>
                 <TH>API key</TH>
+                <TH>URL Regex</TH>
                 <TH>Paths</TH>
                 <TH>Matchers</TH>
                 <TH></TH>
@@ -289,6 +291,15 @@ export default function PatternRulesPage() {
                     <Badge variant="muted">{item.context}</Badge>
                   </TD>
                   <TD>{item.apiKeyName}</TD>
+                  <TD className="text-xs text-muted-foreground max-w-[150px] truncate" title={item.urlRegex || ''}>
+                    {item.urlRegex ? (
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {item.urlRegex.length > 20 ? item.urlRegex.slice(0, 20) + '…' : item.urlRegex}
+                      </Badge>
+                    ) : (
+                      '—'
+                    )}
+                  </TD>
                   <TD className="text-xs text-muted-foreground">
                     {item.paths.length ? (
                       <div className="flex flex-wrap gap-1">
@@ -329,7 +340,7 @@ export default function PatternRulesPage() {
             </TBody>
           </Table>
         ) : search ? (
-          <p className="text-sm text-muted-foreground">No rules match “{search}”.</p>
+          <p className="text-sm text-muted-foreground">No rules match "{search}".</p>
         ) : (
           <p className="text-sm text-muted-foreground">No rules defined.</p>
         )}
@@ -340,7 +351,7 @@ export default function PatternRulesPage() {
         open={isFormOpen}
         onClose={closeForm}
         title={editingId ? 'Edit rule' : 'Create rule'}
-        description="Validates context-specific requirements."
+        description="URL regex is required. Body matchers are optional for additional filtering."
       >
         {submitError ? (
           <div className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
@@ -379,8 +390,28 @@ export default function PatternRulesPage() {
 
           {context !== 'response_stream' ? (
             <div className="space-y-2">
-              <Label>JSON path</Label>
+              <Label>URL Regex <span className="text-warning">*</span></Label>
+              <Input
+                placeholder="^/v1/chat/completions(\?.*)?$"
+                {...form.register('urlRegex')}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Required. Match against the request URL path + query string.
+              </p>
+              {form.formState.errors.urlRegex ? (
+                <p className="text-xs text-warning">{form.formState.errors.urlRegex.message as string}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {context !== 'response_stream' ? (
+            <div className="space-y-2">
+              <Label>JSON paths (optional)</Label>
               <Textarea rows={3} placeholder=".something.example" {...form.register('paths')} />
+              <p className="text-xs text-muted-foreground">
+                Optional. Paths to extract from request/response body for inspection.
+              </p>
               {form.formState.errors.paths ? (
                 <p className="text-xs text-warning">{form.formState.errors.paths.message as string}</p>
               ) : null}
@@ -390,7 +421,7 @@ export default function PatternRulesPage() {
           {context !== 'response_stream' ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Matchers</Label>
+                <Label>Body Matchers (optional)</Label>
                 <Button
                   type="button"
                   variant="outline"
@@ -400,14 +431,15 @@ export default function PatternRulesPage() {
                   <Plus className="mr-1 h-4 w-4" /> Add matcher
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Optional. Add body matchers for additional filtering after URL matches.
+              </p>
               {matcherPreview ? (
                 <div className="text-xs text-muted-foreground">
                   <p className="mb-1">Saved matchers preview</p>
                   {matcherPreview}
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Add at least one matcher with equals/contains/exists.</p>
-              )}
+              ) : null}
               <div className="space-y-3">
                 {matcherArray.fields.map((field, index) => {
                   const matcherErrors = form.formState.errors.matchers?.[index]
@@ -420,7 +452,6 @@ export default function PatternRulesPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => matcherArray.remove(index)}
-                          disabled={matcherArray.fields.length === 1}
                         >
                           <Trash2 className="h-4 w-4 text-warning" />
                         </Button>
@@ -456,7 +487,7 @@ export default function PatternRulesPage() {
             <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
               <p className="text-sm font-medium text-foreground">response_stream context</p>
               <p className="mt-1">
-                Paths and matchers are ignored by the backend for streaming responses. They remain stored here only for
+                URL regex, paths, and matchers are ignored by the backend for streaming responses. They remain stored here only for
                 documentation so you can keep notes on observed fields.
               </p>
               {matcherPreview ? (

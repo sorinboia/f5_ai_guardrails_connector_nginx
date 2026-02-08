@@ -39,8 +39,9 @@ describe('runInspectionPhase', () => {
       redactEnabled: true,
       log: logger,
       sideband: baseSideband,
-      pattern: { id: 'p1', apiKeyName: 'special' },
-      apiKeys: [{ name: 'special', key: 'token' }]
+      pattern: { id: 'p1', urlRegex: '.*', apiKeyName: 'special' },
+      apiKeys: [{ name: 'special', key: 'token' }],
+      requestUrl: '/v1/chat'
     });
 
     expect(res.status).toBe('blocked');
@@ -62,8 +63,9 @@ describe('runInspectionPhase', () => {
       redactEnabled: false,
       log: logger,
       sideband: baseSideband,
-      pattern: { id: 'p2', apiKeyName: 'k1' },
-      apiKeys: [{ name: 'k1', key: 'token' }]
+      pattern: { id: 'p2', urlRegex: '.*', apiKeyName: 'k1' },
+      apiKeys: [{ name: 'k1', key: 'token' }],
+      requestUrl: '/v1/chat'
     });
 
     expect(res.status).toBe('blocked');
@@ -91,12 +93,49 @@ describe('runInspectionPhase', () => {
       redactEnabled: true,
       log: logger,
       sideband: baseSideband,
-      pattern: { id: 'p3', apiKeyName: 'k2' },
-      apiKeys: [{ name: 'k2', key: 'token' }]
+      pattern: { id: 'p3', urlRegex: '.*', apiKeyName: 'k2' },
+      apiKeys: [{ name: 'k2', key: 'token' }],
+      requestUrl: '/v1/chat'
     });
 
     expect(res.status).toBe('redacted');
     expect(res.bodyText).toContain('*****t token');
+  });
+
+  it('skips when urlRegex is not configured', async () => {
+    const res = await runInspectionPhase({
+      phase: 'request',
+      bodyText: JSON.stringify({ message: { content: 'test' } }),
+      paths: ['.message.content'],
+      inspectEnabled: true,
+      redactEnabled: true,
+      log: logger,
+      sideband: baseSideband,
+      pattern: { id: 'p4', apiKeyName: 'k1' }, // no urlRegex
+      apiKeys: [{ name: 'k1', key: 'token' }],
+      requestUrl: '/v1/chat'
+    });
+
+    expect(res.status).toBe('skipped_no_match');
+    expect(callSideband).not.toHaveBeenCalled();
+  });
+
+  it('skips when urlRegex does not match', async () => {
+    const res = await runInspectionPhase({
+      phase: 'request',
+      bodyText: JSON.stringify({ message: { content: 'test' } }),
+      paths: ['.message.content'],
+      inspectEnabled: true,
+      redactEnabled: true,
+      log: logger,
+      sideband: baseSideband,
+      pattern: { id: 'p5', urlRegex: '^/v2/', apiKeyName: 'k1' },
+      apiKeys: [{ name: 'k1', key: 'token' }],
+      requestUrl: '/v1/chat'
+    });
+
+    expect(res.status).toBe('skipped_no_match');
+    expect(callSideband).not.toHaveBeenCalled();
   });
 });
 
@@ -109,17 +148,39 @@ describe('processInspectionStage', () => {
       body: JSON.stringify({ messages: [{ content: 'hello' }] }),
       fallbackPaths: ['.messages[-1].content'],
       patternsList: [
-        { id: 'pat1', apiKeyName: 'k-default', matchers: [{ path: '.messages[-1].content', equals: 'hello' }] }
+        { id: 'pat1', urlRegex: '.*', apiKeyName: 'k-default', matchers: [{ path: '.messages[-1].content', equals: 'hello' }] }
       ],
       inspectEnabled: true,
       redactEnabled: true,
       parallelExtractors: true,
       sideband: baseSideband,
       apiKeys: [{ name: 'k-default', key: 'token' }],
-      log: logger
+      log: logger,
+      requestUrl: '/v1/chat'
     });
 
     expect(res.status).toBe('cleared');
     expect(callSideband).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips all patterns when none have matching urlRegex', async () => {
+    const res = await processInspectionStage({
+      phase: 'request',
+      body: JSON.stringify({ messages: [{ content: 'hello' }] }),
+      fallbackPaths: ['.messages[-1].content'],
+      patternsList: [
+        { id: 'pat1', urlRegex: '^/v2/', apiKeyName: 'k-default', matchers: [] }
+      ],
+      inspectEnabled: true,
+      redactEnabled: true,
+      parallelExtractors: false,
+      sideband: baseSideband,
+      apiKeys: [{ name: 'k-default', key: 'token' }],
+      log: logger,
+      requestUrl: '/v1/chat'
+    });
+
+    expect(res.status).toBe('skipped');
+    expect(callSideband).not.toHaveBeenCalled();
   });
 });

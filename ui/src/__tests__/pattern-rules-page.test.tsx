@@ -40,7 +40,7 @@ describe('PatternRulesPage', () => {
     await user.click(screen.getByText('Next'))
     expect(screen.getByText('rule-7')).toBeInTheDocument()
 
-    const search = screen.getByPlaceholderText('Search name, note, or path')
+    const search = screen.getByPlaceholderText('Search name, note, path, or URL pattern')
     await user.clear(search)
     await user.type(search, 'note')
 
