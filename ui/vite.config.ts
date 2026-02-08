@@ -29,6 +29,10 @@ export default defineConfig({
         target: 'http://localhost:22100',
         changeOrigin: true,
       },
+      '/logs': {
+        target: 'http://localhost:22100',
+        changeOrigin: true,
+      },
     },
   },
   test: {

@@ -8,4 +8,5 @@ node/npm-debug.log
 ui/npm-debug.log
 .DS_Store
 # Runtime/persisted config should stay out of images
-var/guardrails_config.json
+node/var/guardrails_config.json
+guardrails_config.json

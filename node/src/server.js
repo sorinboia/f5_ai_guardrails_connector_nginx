@@ -107,6 +107,14 @@ function createLoggerWithCapture(config, logBuffer) {
           logObj.level = level;
           logObj.time = Date.now();
 
+          // Include bindings from child loggers (like host, trace_id, etc.)
+          // Pino stores bindings in the chindings property as a JSON string suffix
+          // We need to extract them from the logger instance
+          if (this && this.bindings) {
+            const bindings = this.bindings();
+            Object.assign(logObj, bindings);
+          }
+
           captureHook(logObj);
         } catch (err) {
           // Ignore capture errors

@@ -128,6 +128,51 @@ function generateId() {
 }
 
 /**
+ * Safely copy a value, handling complex objects that may have circular references.
+ * @param {*} value - The value to copy
+ * @param {number} depth - Current recursion depth
+ * @returns {*} A safe, serializable copy of the value
+ */
+function safeCopy(value, depth = 0) {
+  // Limit recursion depth
+  if (depth > 3) return '[nested]';
+
+  // Handle primitives
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'object') return value;
+
+  // Handle arrays
+  if (Array.isArray(value)) {
+    return value.slice(0, 10).map(v => safeCopy(v, depth + 1));
+  }
+
+  // Skip known problematic types (Buffers, Streams, Sockets, etc.)
+  const constructor = value.constructor?.name;
+  if (constructor && ['Socket', 'Stream', 'IncomingMessage', 'ServerResponse',
+                       'Buffer', 'HTTPParser', 'EventEmitter', 'Readable',
+                       'Writable', 'Duplex', 'Transform', 'PassThrough'].includes(constructor)) {
+    return `[${constructor}]`;
+  }
+
+  // Handle Date
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  // Handle plain objects
+  const result = {};
+  const keys = Object.keys(value).slice(0, 20); // Limit number of keys
+  for (const key of keys) {
+    try {
+      result[key] = safeCopy(value[key], depth + 1);
+    } catch (err) {
+      result[key] = '[error]';
+    }
+  }
+  return result;
+}
+
+/**
  * Convert a Pino log object to our LogEntry format
  * @param {Object} logObj - Parsed Pino log object
  * @returns {Object} LogEntry
@@ -143,13 +188,17 @@ function toLogEntry(logObj) {
 
   // Build details object with extra fields
   const details = {};
+  // Skip fields that are either already extracted or known to cause issues
   const skipFields = ['level', 'time', 'pid', 'hostname', 'service', 'msg', 'message',
                       'step', 'trace_id', 'host', 'url', 'method', 'pattern_id',
-                      'pattern_name', 'api_key_name', 'v'];
+                      'pattern_name', 'api_key_name', 'v',
+                      // Skip known problematic Pino/Fastify fields
+                      'req', 'res', 'responseTime', 'err', 'reqId',
+                      'host_log_level', 'upstream_host'];
 
   for (const [key, value] of Object.entries(logObj)) {
     if (!skipFields.includes(key) && value !== undefined) {
-      details[key] = value;
+      details[key] = safeCopy(value);
     }
   }
 
