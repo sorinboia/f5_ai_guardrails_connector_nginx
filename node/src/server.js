@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import Fastify from 'fastify';
+import pino from 'pino';
 import { randomUUID } from 'crypto';
 import routes from './routes/index.js';
 import { loadConfigFromEnv, loadTlsOptions } from './config/env.js';
 import { createLogger } from './logging/logger.js';
+import { LogRingBuffer } from './logging/logBuffer.js';
+import { createLogCaptureHook } from './logging/logCapture.js';
 import { loadStore, saveStore, validateStoreShape } from './config/store.js';
 import { startForwardProxy } from './forwardProxy.js';
 
@@ -61,7 +64,59 @@ function watchStore(store, logger, storePath) {
   }
 }
 
-function buildApp(config, logger, store, tlsOptions = null, routeOptions = {}) {
+/**
+ * Create a logger with log capture hook for the UI logs viewer
+ * @param {Object} config - Application config
+ * @param {LogRingBuffer} logBuffer - Ring buffer to capture logs to
+ * @returns {pino.Logger}
+ */
+function createLoggerWithCapture(config, logBuffer) {
+  const level = config.logLevel || 'info';
+  const captureHook = createLogCaptureHook(logBuffer);
+
+  return pino({
+    level,
+    messageKey: 'message',
+    base: { service: config.serviceName || 'f5-ai-connector-node' },
+    formatters: {
+      level(label) {
+        return { level: label };
+      }
+    },
+    hooks: {
+      // Hook into Pino's logging to capture entries for the UI
+      logMethod(inputArgs, method, level) {
+        // Call original method first
+        method.apply(this, inputArgs);
+
+        // Capture the log entry
+        try {
+          // Build the log object from args
+          const [first, ...rest] = inputArgs;
+          let logObj = {};
+
+          if (typeof first === 'object' && first !== null) {
+            logObj = { ...first };
+            if (rest.length && typeof rest[0] === 'string') {
+              logObj.message = rest[0];
+            }
+          } else if (typeof first === 'string') {
+            logObj.message = first;
+          }
+
+          logObj.level = level;
+          logObj.time = Date.now();
+
+          captureHook(logObj);
+        } catch (err) {
+          // Ignore capture errors
+        }
+      }
+    }
+  });
+}
+
+function buildApp(config, logger, store, tlsOptions = null, routeOptions = {}, logBuffer = null) {
   const app = Fastify({
     logger,
     trustProxy: true,
@@ -74,6 +129,11 @@ function buildApp(config, logger, store, tlsOptions = null, routeOptions = {}) {
   app.decorate('appConfig', config);
   app.decorate('store', store);
   app.decorate('saveStore', (nextStore) => saveStore(nextStore, logger, config.storePath));
+
+  // Add logBuffer for management server (logs API)
+  if (logBuffer) {
+    app.decorate('logBuffer', logBuffer);
+  }
 
   app.register(routes, {
     backendOrigin: config.backendOrigin,
@@ -90,15 +150,22 @@ function buildApp(config, logger, store, tlsOptions = null, routeOptions = {}) {
 
 async function start() {
   const config = loadConfigFromEnv();
-  const logger = createLogger(config);
+
+  // Create shared log ring buffer for UI logs viewer
+  const logBuffer = new LogRingBuffer(config.logBufferSize);
+
+  // Create logger with capture hook
+  const logger = createLoggerWithCapture(config, logBuffer);
+
   const store = loadStore(logger, config.storePath);
   watchStore(store, logger, config.storePath);
 
+  // Management server gets the logBuffer for the logs API
   const managementApp = buildApp(config, logger, store, null, {
     enableProxy: false,
     enableStatic: true,
     enableManagement: true
-  });
+  }, logBuffer);
   await managementApp.listen({ port: config.managementPort, host: '0.0.0.0' });
   logger.info({ port: config.managementPort }, 'Management listener started');
 

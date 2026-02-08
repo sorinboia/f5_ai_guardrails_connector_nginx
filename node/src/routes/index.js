@@ -1,6 +1,7 @@
 import fp from 'fastify-plugin';
 import proxy from '@fastify/http-proxy';
 import managementRoutes from './management.js';
+import logsRoutes from './logs.js';
 import staticRoutes from './static.js';
 import proxyRoutes from './proxy.js';
 import { resolveConfig } from '../config/validate.js';
@@ -51,6 +52,7 @@ async function routes(fastify, opts) {
   // Management APIs (placeholders for now).
   if (enableManagement) {
     fastify.register(managementRoutes);
+    fastify.register(logsRoutes);
   }
 
   // Proxy pipeline (includes /api/tags passthrough and catch-all).

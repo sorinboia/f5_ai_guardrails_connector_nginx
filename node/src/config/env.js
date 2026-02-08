@@ -15,6 +15,7 @@ const DEFAULT_SIDEBAND_BEARER = '';
 const DEFAULT_SIDEBAND_UA = 'njs-sideband/1.0';
 const TESTS_LOCAL_SIDEBAND = 'http://127.0.0.1:18081/backend/v1/scans';
 const DEFAULT_STORE_PATH = 'var/guardrails_config.json';
+const DEFAULT_LOG_BUFFER_SIZE = 1000;
 
 function fileExists(p) {
   try {
@@ -41,6 +42,7 @@ export function loadConfigFromEnv() {
   const mitmCaCert = process.env.MITM_CA_CERT || '';
   const mitmCaKey = process.env.MITM_CA_KEY || '';
   const mitmValidityDays = Number(process.env.MITM_CERT_VALIDITY_DAYS || 365);
+  const logBufferSize = Number(process.env.LOG_BUFFER_SIZE || DEFAULT_LOG_BUFFER_SIZE);
 
   return {
     backendOrigin,
@@ -70,7 +72,8 @@ export function loadConfigFromEnv() {
       enabled: forwardProxyEnabled,
       port: forwardProxyPort
     },
-    serviceName: 'f5-ai-connector-node'
+    serviceName: 'f5-ai-connector-node',
+    logBufferSize
   };
 }
 

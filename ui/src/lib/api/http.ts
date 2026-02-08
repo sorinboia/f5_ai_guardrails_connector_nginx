@@ -1,10 +1,12 @@
 import type { ApiKey, BlockingResponse } from '@/lib/types/api-key'
 import type { CollectorState } from '@/lib/types/collector'
 import type { ConfigResponse, HostConfig, HostConfigPatch } from '@/lib/types/config'
+import type { LogFilters, LogsResponse } from '@/lib/types/log'
 import type { PatternRule } from '@/lib/types/pattern'
 import type { StoreSnapshot } from '@/lib/types/store'
 
 const baseUrl = new URL('/config', window.location.origin).toString().replace(/\/$/, '')
+const logsBaseUrl = new URL('/logs', window.location.origin).toString().replace(/\/$/, '')
 
 type RequestInitWithBody = RequestInit & { body?: BodyInit | null }
 
@@ -17,6 +19,29 @@ type ApiError = {
 
 async function request<T>(path: string, init: RequestInitWithBody = {}): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
+    ...init,
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+      ...init.headers,
+    },
+  })
+
+  const contentType = response.headers.get('content-type') || ''
+  const isJson = contentType.includes('application/json')
+  const payload = isJson ? await response.json() : await response.text()
+
+  if (!response.ok) {
+    const err: ApiError = typeof payload === 'object' && payload ? payload : { message: String(payload) }
+    err.status = response.status
+    throw err
+  }
+
+  return payload as T
+}
+
+async function logsRequest<T>(path: string, init: RequestInitWithBody = {}): Promise<T> {
+  const response = await fetch(`${logsBaseUrl}${path}`, {
     ...init,
     headers: {
       'content-type': 'application/json',
@@ -169,4 +194,50 @@ export function mapBlockingResponse(input?: BlockingResponse): BlockingResponse 
     contentType: input.contentType || 'application/json; charset=utf-8',
     body: input.body || '',
   }
+}
+
+// Logs API
+
+export async function fetchLogs(filters: LogFilters = {}): Promise<LogsResponse> {
+  const params = new URLSearchParams()
+  if (filters.host) params.set('host', filters.host)
+  if (filters.level) params.set('level', filters.level)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.search) params.set('search', filters.search)
+  if (filters.limit) params.set('limit', String(filters.limit))
+  if (filters.before) params.set('before', filters.before)
+
+  const queryString = params.toString()
+  const url = queryString ? `/api?${queryString}` : '/api'
+
+  return logsRequest<LogsResponse>(url, { method: 'GET' })
+}
+
+export async function clearLogs(): Promise<{ cleared: number }> {
+  return logsRequest<{ cleared: number }>('/api', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'clear' }),
+  })
+}
+
+export function getLogsExportUrl(filters: LogFilters = {}): string {
+  const params = new URLSearchParams()
+  if (filters.host) params.set('host', filters.host)
+  if (filters.level) params.set('level', filters.level)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.search) params.set('search', filters.search)
+
+  const queryString = params.toString()
+  return queryString ? `${logsBaseUrl}/api/export?${queryString}` : `${logsBaseUrl}/api/export`
+}
+
+export function getLogsStreamUrl(filters: LogFilters = {}): string {
+  const params = new URLSearchParams()
+  if (filters.host) params.set('host', filters.host)
+  if (filters.level) params.set('level', filters.level)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.search) params.set('search', filters.search)
+
+  const queryString = params.toString()
+  return queryString ? `${logsBaseUrl}/stream?${queryString}` : `${logsBaseUrl}/stream`
 }

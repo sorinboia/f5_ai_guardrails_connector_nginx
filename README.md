@@ -4,7 +4,7 @@ Fastify-based reverse proxy that applies Calypso Guardrails scanning to AI traff
 
 ## What it does
 - Listens on data-plane HTTP `22080` and optional HTTPS `22443` when cert/key are present.
-- Serves management UI/APIs on `22100` (`/config/ui`, `/config/api*`, `/collector/api`).
+- Serves management UI/APIs on `22100` (`/config/ui`, `/config/api*`, `/collector/api`, `/logs/api`, `/logs/stream`).
 - Runs the Guardrails inspection pipeline against all proxied traffic (bypass only for `/api/tags`).
 - Forward proxy on `10000` enforces destinations stored in the config file and relays into the data-plane listeners so inspection always applies.
 
@@ -37,6 +37,7 @@ Defaults come from `node/src/config/env.js` and are restated in `SPEC_BACKEND.md
 - `CONFIG_STORE_PATH` (`var/guardrails_config.json`): persisted hosts/keys/patterns/collector config.
 - `CA_BUNDLE` (`/etc/ssl/certs/ca-certificates.crt`): trust bundle for upstream TLS.
 - `LOG_LEVEL` (`info`).
+- `LOG_BUFFER_SIZE` (`1000`): max log entries retained in memory for the logs viewer.
 
 ## Local development
 ```bash
@@ -58,3 +59,34 @@ curl http://localhost:22080/api/chat -H "content-type: application/json" -d '{
 }'
 ```
 Watch container logs for inspection outcomes; switch to `https://localhost:22443` when you supply TLS assets. The management UI/API stay on `http://localhost:22100`.
+
+## Logs Viewer
+
+The management UI includes a real-time logs viewer at `/config/ui` → Logs. It displays guardrail decisions and proxy events as they happen.
+
+### Features
+- **Real-time streaming**: Connect via SSE to see logs as they arrive
+- **Filtering**: Filter by host, level (debug/info/warn/error), status (cleared/blocked/redacted/skipped/error), or search text
+- **Export**: Download filtered logs as JSON
+- **Expandable rows**: Click any log entry to see full details
+
+### Logs API
+
+```bash
+# Fetch recent logs
+curl http://localhost:22100/logs/api
+
+# Fetch with filters
+curl "http://localhost:22100/logs/api?host=api.openai.com&status=blocked&limit=50"
+
+# Clear all logs
+curl -X POST http://localhost:22100/logs/api -H "content-type: application/json" -d '{"action":"clear"}'
+
+# Export logs as file
+curl -O http://localhost:22100/logs/api/export
+
+# Stream logs via SSE
+curl -N http://localhost:22100/logs/stream
+```
+
+Logs are stored in memory only (up to `LOG_BUFFER_SIZE` entries) and are lost on restart.
