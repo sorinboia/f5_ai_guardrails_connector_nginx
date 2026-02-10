@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ProxyHandler } from '../src/pipeline/proxyPipeline.js';
-import { defaultStore, SCAN_CONFIG_DEFAULTS } from '../src/config/store.js';
+import { ProxyContext } from '../src/pipeline/ProxyContext.js';
+import { defaultStore } from '../src/config/store.js';
+import { SCAN_CONFIG_DEFAULTS } from '../src/config/constants.js';
 
 const baseAppConfig = {
   backendOrigin: 'https://example.com',
@@ -45,7 +46,7 @@ function makeReqRes(log = fakeLog()) {
   return { request, reply };
 }
 
-describe('ProxyHandler.prepareContext', () => {
+describe('ProxyContext', () => {
   it('disables request redaction when parallel forward is enabled with inspection', () => {
     const log = fakeLog();
     const { request, reply } = makeReqRes(log);
@@ -59,12 +60,11 @@ describe('ProxyHandler.prepareContext', () => {
         }
       }
     });
-    const handler = new ProxyHandler(fastify);
 
-    const ctx = handler.prepareContext(request, reply);
+    const ctx = new ProxyContext(fastify, request, reply);
 
-    expect(ctx.redactRequestEnabled).toBe(false);
-    expect(ctx.parallelForward).toBe(true);
+    expect(ctx.flags.redactRequestEnabled).toBe(false);
+    expect(ctx.flags.parallelForward).toBe(true);
     expect(log.info).toHaveBeenCalledWith({ step: 'forward_mode:parallel_request_redaction_disabled' });
   });
 
@@ -81,14 +81,13 @@ describe('ProxyHandler.prepareContext', () => {
         }
       }
     });
-    const handler = new ProxyHandler(fastify);
 
-    const ctx = handler.prepareContext(request, reply);
+    const ctx = new ProxyContext(fastify, request, reply);
 
     expect(ctx.stream.passthrough).toBe(true);
-    expect(ctx.parallelForward).toBe(false);
+    expect(ctx.flags.parallelForward).toBe(false);
     expect(ctx.stream.blockingAllowed).toBe(false);
-    expect(ctx.redactResponseEnabled).toBe(false);
+    expect(ctx.flags.redactResponseEnabled).toBe(false);
     expect(log.info).toHaveBeenCalledWith({ step: 'forward_mode:passthrough_forces_sequential' });
     expect(log.info).toHaveBeenCalledWith({ step: 'stream:redaction_disabled', reason: 'streaming responses are not mutated' });
   });

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { validateConfigPatch, resolveConfig, normalizeHostName } from '../src/config/validate.js';
-import { defaultStore, SCAN_CONFIG_DEFAULTS } from '../src/config/store.js';
+import { validateConfigPatch, resolveConfig } from '../src/config/validate.js';
+import { normalizeHostName } from '../src/config/hosts.js';
+import { defaultStore } from '../src/config/store.js';
+import { SCAN_CONFIG_DEFAULTS } from '../src/config/constants.js';
 
 describe('normalizeHostName', () => {
   it('normalizes case and trims whitespace with default fallback', () => {
@@ -87,7 +89,7 @@ describe('resolveConfig', () => {
     expect(resolved.extractorParallelEnabled).toBe(true);
     expect(resolved.backendOrigin).toBe('http://127.0.0.1:18080');
 
-    const fallback = resolveConfig(store);
+    const fallback = resolveConfig(store, '__default__');
     expect(fallback.inspectMode).toBe(SCAN_CONFIG_DEFAULTS.inspectMode);
     expect(fallback.backendOrigin).toBe(SCAN_CONFIG_DEFAULTS.backendOrigin);
   });

@@ -1,16 +1,14 @@
 import {
   REQUEST_PATHS_DEFAULT,
   RESPONSE_PATHS_DEFAULT,
-  safeJsonParse,
   getPathAccessor
 } from './utils.js';
+import { safeJsonParse } from './safeJson.js';
 import { collectRedactionPlan, applyRedactions, extractContextPayload } from './redaction.js';
 import { callSideband } from './sidebandClient.js';
-
-const EXTRACT_PREVIEW_LIMIT = 4000;
+import { EXTRACT_PREVIEW_LIMIT } from '../config/constants.js';
 
 function evaluateUrlMatcher(urlRegex, requestUrl) {
-  // URL regex is required - if not configured, pattern doesn't match
   if (!urlRegex || (typeof urlRegex === 'string' && !urlRegex.trim())) {
     return { matched: false, reason: 'no_url_regex_configured' };
   }
@@ -29,7 +27,6 @@ function evaluateUrlMatcher(urlRegex, requestUrl) {
 function evaluateMatchers(parsed, matchers = [], options = {}) {
   const { urlRegex, requestUrl } = options;
 
-  // Check URL regex first if specified
   const urlResult = evaluateUrlMatcher(urlRegex, requestUrl);
   if (!urlResult.matched) return urlResult;
 
@@ -68,13 +65,11 @@ function selectApiKeyForPattern(context, pattern, apiKeys, defaultBearer, logger
   const hasMatchers = Array.isArray(pattern.matchers) && pattern.matchers.length;
   const hasUrlRegex = pattern.urlRegex && typeof pattern.urlRegex === 'string' && pattern.urlRegex.trim();
 
-  // If there are body matchers but no parsed JSON, skip (unless we only have URL matching)
   if (hasMatchers && !parsed) {
     logger.debug({ step: `${phase}:pattern_no_json`, pattern_id: pattern.id });
     return { bearer: defaultBearer, matched: false, shouldRun: false, apiKeyName: pattern.apiKeyName, patternId: pattern.id };
   }
 
-  // URL regex is required for pattern matching
   const evaluation = evaluateMatchers(parsed, hasMatchers ? pattern.matchers : [], {
     urlRegex: hasUrlRegex ? pattern.urlRegex : null,
     requestUrl
@@ -128,6 +123,78 @@ function parseOutcome(status, text) {
   return { outcome, json, status, text };
 }
 
+// Unified inspection result builder
+function buildInspectionResult(status, outcome, opts = {}) {
+  return {
+    status,
+    outcome,
+    details: opts.details,
+    bodyText: opts.bodyText,
+    apiKeyName: opts.apiKeyName,
+    patternId: opts.patternId
+  };
+}
+
+function handleFlaggedOutcome(phase, keyDecision, pattern, status) {
+  return buildInspectionResult('blocked', 'flagged', {
+    details: { sideband_status: status },
+    apiKeyName: keyDecision.apiKeyName,
+    patternId: pattern?.id
+  });
+}
+
+function handleRedactedOutcome(opts) {
+  const { phase, redactEnabled, json, context, log, keyDecision, pattern, sidebandStatus, bodyText } = opts;
+
+  if (!redactEnabled) {
+    return buildInspectionResult('blocked', 'redacted', {
+      details: { sideband_status: sidebandStatus, reason: `${phase} redaction disabled` },
+      apiKeyName: keyDecision.apiKeyName,
+      patternId: pattern?.id
+    });
+  }
+
+  const plan = collectRedactionPlan(json);
+  let redaction = { applied: plan.matches.length === 0, unmatched: 0, text: undefined };
+
+  if (plan.matches.length) {
+    redaction = applyRedactions(context, plan.matches, log, phase);
+  } else {
+    log.info({ step: `${phase}:redaction_skipped`, reason: 'no regex matches returned' });
+  }
+
+  const redactionOk = redaction.applied && redaction.unmatched === 0 && plan.unsupported.length === 0;
+  if (!redactionOk) {
+    return buildInspectionResult('blocked', 'redacted', {
+      details: { sideband_status: sidebandStatus, failed_scanners: plan.failedCount, unsupported_scanners: plan.unsupported },
+      apiKeyName: keyDecision.apiKeyName,
+      patternId: pattern?.id
+    });
+  }
+
+  return buildInspectionResult('redacted', 'redacted', {
+    bodyText: redaction.text ?? bodyText,
+    apiKeyName: keyDecision.apiKeyName,
+    patternId: pattern?.id
+  });
+}
+
+function handleUnexpectedOutcome(phase, outcome, keyDecision, pattern, status) {
+  return buildInspectionResult('blocked', outcome, {
+    details: { sideband_status: status, reason: `unexpected ${phase} outcome` },
+    apiKeyName: keyDecision.apiKeyName,
+    patternId: pattern?.id
+  });
+}
+
+function handleClearedOutcome(outcome, keyDecision, pattern, bodyText) {
+  return buildInspectionResult('cleared', outcome, {
+    bodyText,
+    apiKeyName: keyDecision.apiKeyName,
+    patternId: pattern?.id
+  });
+}
+
 async function runInspectionPhase(opts) {
   const {
     phase,
@@ -148,6 +215,7 @@ async function runInspectionPhase(opts) {
 
   const context = extractContextPayload(bodyText, paths, log, phase);
   const keyDecision = selectApiKeyForPattern(context, pattern, apiKeys, sideband.bearer, log, phase, requestUrl);
+
   if (keyDecision.shouldRun === false) {
     return {
       status: 'skipped_no_match',
@@ -174,69 +242,28 @@ async function runInspectionPhase(opts) {
   const normalizedOutcome = outcome || '';
 
   if (normalizedOutcome === 'flagged') {
-    return {
-      status: 'blocked',
-      outcome: normalizedOutcome,
-      details: { sideband_status: status },
-      apiKeyName: keyDecision.apiKeyName,
-      patternId: pattern?.id
-    };
+    return handleFlaggedOutcome(phase, keyDecision, pattern, status);
   }
 
   if (normalizedOutcome === 'redacted') {
-    if (!redactEnabled) {
-      return {
-        status: 'blocked',
-        outcome: normalizedOutcome,
-        details: { sideband_status: status, reason: `${phase} redaction disabled` },
-        apiKeyName: keyDecision.apiKeyName,
-        patternId: pattern?.id
-      };
-    }
-    const plan = collectRedactionPlan(json);
-    let redaction = { applied: plan.matches.length === 0, unmatched: 0, text: undefined };
-    if (plan.matches.length) {
-      redaction = applyRedactions(context, plan.matches, log, phase);
-    } else {
-      log.info({ step: `${phase}:redaction_skipped`, reason: 'no regex matches returned' });
-    }
-
-    const redactionOk = redaction.applied && redaction.unmatched === 0 && plan.unsupported.length === 0;
-    if (!redactionOk) {
-      return {
-        status: 'blocked',
-        outcome: normalizedOutcome,
-        details: { sideband_status: status, failed_scanners: plan.failedCount, unsupported_scanners: plan.unsupported },
-        apiKeyName: keyDecision.apiKeyName,
-        patternId: pattern?.id
-      };
-    }
-    return {
-      status: 'redacted',
-      outcome: normalizedOutcome,
-      bodyText: redaction.text ?? bodyText,
-      apiKeyName: keyDecision.apiKeyName,
-      patternId: pattern?.id
-    };
+    return handleRedactedOutcome({
+      phase,
+      redactEnabled,
+      json,
+      context,
+      log,
+      keyDecision,
+      pattern,
+      sidebandStatus: status,
+      bodyText
+    });
   }
 
   if (normalizedOutcome && normalizedOutcome !== 'cleared') {
-    return {
-      status: 'blocked',
-      outcome: normalizedOutcome,
-      details: { sideband_status: status, reason: `unexpected ${phase} outcome` },
-      apiKeyName: keyDecision.apiKeyName,
-      patternId: pattern?.id
-    };
+    return handleUnexpectedOutcome(phase, normalizedOutcome, keyDecision, pattern, status);
   }
 
-  return {
-    status: 'cleared',
-    outcome: normalizedOutcome,
-    bodyText,
-    apiKeyName: keyDecision.apiKeyName,
-    patternId: pattern?.id
-  };
+  return handleClearedOutcome(normalizedOutcome, keyDecision, pattern, bodyText);
 }
 
 async function processInspectionStage(opts) {
@@ -255,9 +282,12 @@ async function processInspectionStage(opts) {
   } = opts;
 
   if (!inspectEnabled) return { status: 'skipped', body };
+
   const runParallel = parallelExtractors && patternsList.length > 0;
   const effectiveRedact = runParallel ? false : !!redactEnabled;
-  const pathsFallback = (fallbackPaths && fallbackPaths.length) ? fallbackPaths : (phase === 'request' ? REQUEST_PATHS_DEFAULT : RESPONSE_PATHS_DEFAULT);
+  const pathsFallback = (fallbackPaths && fallbackPaths.length)
+    ? fallbackPaths
+    : (phase === 'request' ? REQUEST_PATHS_DEFAULT : RESPONSE_PATHS_DEFAULT);
 
   if (runParallel) {
     const results = await Promise.all(patternsList.map((pattern) => runInspectionPhase({
@@ -283,6 +313,7 @@ async function processInspectionStage(opts) {
   let currentBody = body;
   let executed = false;
   let redactionApplied = false;
+
   for (let i = 0; i < patternsList.length; i++) {
     const pattern = patternsList[i];
     const paths = (Array.isArray(pattern.paths) && pattern.paths.length) ? pattern.paths : pathsFallback;
@@ -298,6 +329,7 @@ async function processInspectionStage(opts) {
       apiKeys,
       requestUrl
     });
+
     if (result.status === 'blocked') return result;
     if (result.bodyText !== undefined) currentBody = result.bodyText;
     if (result.status !== 'skipped' && result.status !== 'skipped_no_match') {

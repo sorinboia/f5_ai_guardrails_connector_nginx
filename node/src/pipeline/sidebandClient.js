@@ -1,19 +1,17 @@
 import { fetch } from 'undici';
 import { getDispatcher } from './dispatcher.js';
-
-const DEFAULT_TIMEOUT_MS = 5000;
-const DEFAULT_UA = 'njs-sideband/1.0';
+import { DEFAULT_SIDEBAND_TIMEOUT_MS, DEFAULT_SIDEBAND_UA } from '../config/constants.js';
 
 export async function callSideband({
   url,
   bearer,
   payload,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs = DEFAULT_SIDEBAND_TIMEOUT_MS,
   caBundle,
   testsLocalOverride,
   hostHeader,
   logger,
-  ua = DEFAULT_UA
+  ua = DEFAULT_SIDEBAND_UA
 }) {
   const targetUrl = (hostHeader && hostHeader.toLowerCase() === 'tests.local' && testsLocalOverride)
     ? testsLocalOverride
@@ -21,7 +19,7 @@ export async function callSideband({
 
   const headers = {
     'content-type': 'application/json; charset=utf-8',
-    'user-agent': ua || DEFAULT_UA,
+    'user-agent': ua || DEFAULT_SIDEBAND_UA,
     authorization: `Bearer ${bearer}`
   };
 
@@ -56,8 +54,8 @@ export async function callSideband({
 
     return { status: response.status, text };
   } catch (err) {
-    const name = err?.name || '';
-    const status = name === 'AbortError' ? 599 : 599;
+    // Use 599 for all client-side errors (timeout or network failure)
+    const status = 599;
     logger?.warn(
       { step: 'sideband:error', error: err?.message || String(err), timeout_ms: timeoutMs },
       'Guardrails sideband call failed'

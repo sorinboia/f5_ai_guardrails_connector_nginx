@@ -1,139 +1,107 @@
-import { SCAN_CONFIG_DEFAULTS } from './store.js';
+import {
+  SCAN_CONFIG_DEFAULTS,
+  CONFIG_ENUMS,
+  CONFIG_ENUM_ALIASES,
+  STREAM_CHUNK_SIZE_MIN,
+  STREAM_CHUNK_SIZE_MAX
+} from './constants.js';
 import { normalizeHostName } from './hosts.js';
+import { isHttpUrl, coerceBoolean, coerceInteger } from '../utils/typeGuards.js';
 
-export { normalizeHostName };
-
-export const SCAN_CONFIG_ENUMS = {
-  inspectMode: ['off', 'request', 'response', 'both'],
-  redactMode: ['off', 'request', 'response', 'both', 'on', 'true'],
-  logLevel: ['debug', 'info', 'warn', 'err'],
-  requestForwardMode: ['sequential', 'parallel'],
-  responseStreamBufferingMode: ['buffer', 'passthrough'],
+// Validation schema for config patches
+const PATCH_SCHEMA = {
+  inspectMode: { type: 'enum', enumKey: 'inspectMode' },
+  redactMode: { type: 'enum', enumKey: 'redactMode', aliases: CONFIG_ENUM_ALIASES.redactMode },
+  logLevel: { type: 'enum', enumKey: 'logLevel' },
+  requestForwardMode: { type: 'enum', enumKey: 'requestForwardMode' },
+  responseStreamBufferingMode: { type: 'enum', enumKey: 'responseStreamBufferingMode' },
+  backendOrigin: { type: 'url' },
+  requestExtractor: { type: 'string' },
+  responseExtractor: { type: 'string' },
+  requestExtractors: { type: 'stringArray' },
+  responseExtractors: { type: 'stringArray' },
+  extractorParallelEnabled: { type: 'boolean', outputKey: 'extractorParallel' },
+  extractorParallel: { type: 'boolean', outputKey: 'extractorParallel' },
+  responseStreamEnabled: { type: 'boolean' },
+  responseStreamFinalEnabled: { type: 'boolean' },
+  responseStreamCollectFullEnabled: { type: 'boolean' },
+  responseStreamChunkGatingEnabled: { type: 'boolean' },
+  responseStreamChunkSize: { type: 'integer', min: STREAM_CHUNK_SIZE_MIN, max: STREAM_CHUNK_SIZE_MAX },
+  responseStreamChunkOverlap: { type: 'integer', min: 0 }
 };
 
-function isHttpUrl(value) {
-  return typeof value === 'string' && /^(https?:)\/\//i.test(value);
+function validateEnumField(value, enumKey, aliases) {
+  const val = String(value).toLowerCase();
+  if (aliases && aliases[val]) return { valid: true, value: aliases[val] };
+  if (CONFIG_ENUMS[enumKey].includes(val)) return { valid: true, value: val };
+  return { valid: false, error: `invalid ${enumKey}` };
 }
 
-function coerceBoolean(value) {
-  if (value === undefined) return undefined;
-  if (value === null) return undefined;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    const lower = value.toLowerCase();
-    if (['true', '1', 'yes', 'on'].includes(lower)) return true;
-    if (['false', '0', 'no', 'off'].includes(lower)) return false;
-  }
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-  return undefined;
+function validateUrlField(value) {
+  const val = String(value);
+  if (!isHttpUrl(val)) return { valid: false, error: 'backendOrigin must start with http:// or https://' };
+  return { valid: true, value: val };
 }
 
-function coerceInteger(value) {
-  if (value === undefined || value === null) return undefined;
-  const num = Number(value);
-  if (!Number.isFinite(num) || !Number.isInteger(num)) return undefined;
-  return num;
+function validateStringField(value) {
+  return { valid: true, value: String(value) };
+}
+
+function validateStringArrayField(value, fieldName) {
+  if (!Array.isArray(value)) return { valid: false, error: `${fieldName} must be array` };
+  return { valid: true, value: value.map((x) => String(x)) };
+}
+
+function validateBooleanField(value, fieldName) {
+  const val = coerceBoolean(value);
+  if (val === undefined) return { valid: false, error: `${fieldName} must be boolean` };
+  return { valid: true, value: val };
+}
+
+function validateIntegerField(value, fieldName, min, max) {
+  const val = coerceInteger(value);
+  if (val === undefined) return { valid: false, error: `${fieldName} must be integer` };
+  if (min !== undefined && val < min) return { valid: false, error: `${fieldName} must be at least ${min}` };
+  if (max !== undefined && val > max) return { valid: false, error: `${fieldName} must be at most ${max}` };
+  return { valid: true, value: val };
+}
+
+function validateField(fieldName, value, schema) {
+  switch (schema.type) {
+    case 'enum':
+      return validateEnumField(value, schema.enumKey, schema.aliases);
+    case 'url':
+      return validateUrlField(value);
+    case 'string':
+      return validateStringField(value);
+    case 'stringArray':
+      return validateStringArrayField(value, fieldName);
+    case 'boolean':
+      return validateBooleanField(value, fieldName);
+    case 'integer':
+      return validateIntegerField(value, fieldName, schema.min, schema.max);
+    default:
+      return { valid: false, error: `unknown field type for ${fieldName}` };
+  }
 }
 
 export function validateConfigPatch(patch = {}) {
   const errors = [];
   const updates = {};
 
-  if (patch.inspectMode !== undefined) {
-    const val = String(patch.inspectMode).toLowerCase();
-    if (!SCAN_CONFIG_ENUMS.inspectMode.includes(val)) errors.push('invalid inspectMode');
-    else updates.inspectMode = val;
+  for (const [fieldName, schema] of Object.entries(PATCH_SCHEMA)) {
+    if (patch[fieldName] === undefined) continue;
+
+    const result = validateField(fieldName, patch[fieldName], schema);
+    if (!result.valid) {
+      errors.push(result.error);
+    } else {
+      const outputKey = schema.outputKey || fieldName;
+      updates[outputKey] = result.value;
+    }
   }
 
-  if (patch.redactMode !== undefined) {
-    const val = String(patch.redactMode).toLowerCase();
-    if (!SCAN_CONFIG_ENUMS.redactMode.includes(val)) errors.push('invalid redactMode');
-    else updates.redactMode = (val === 'on' || val === 'true') ? 'both' : val;
-  }
-
-  if (patch.logLevel !== undefined) {
-    const val = String(patch.logLevel).toLowerCase();
-    if (!SCAN_CONFIG_ENUMS.logLevel.includes(val)) errors.push('invalid logLevel');
-    else updates.logLevel = val;
-  }
-
-  if (patch.requestForwardMode !== undefined) {
-    const val = String(patch.requestForwardMode).toLowerCase();
-    if (!SCAN_CONFIG_ENUMS.requestForwardMode.includes(val)) errors.push('invalid requestForwardMode');
-    else updates.requestForwardMode = val;
-  }
-
-  if (patch.responseStreamBufferingMode !== undefined) {
-    const val = String(patch.responseStreamBufferingMode).toLowerCase();
-    if (!SCAN_CONFIG_ENUMS.responseStreamBufferingMode.includes(val)) errors.push('invalid responseStreamBufferingMode');
-    else updates.responseStreamBufferingMode = val;
-  }
-
-  if (patch.backendOrigin !== undefined) {
-    const val = String(patch.backendOrigin);
-    if (!isHttpUrl(val)) errors.push('backendOrigin must start with http:// or https://');
-    else updates.backendOrigin = val;
-  }
-
-  if (patch.requestExtractor !== undefined) {
-    updates.requestExtractor = String(patch.requestExtractor);
-  }
-  if (patch.responseExtractor !== undefined) {
-    updates.responseExtractor = String(patch.responseExtractor);
-  }
-
-  if (patch.requestExtractors !== undefined) {
-    if (!Array.isArray(patch.requestExtractors)) errors.push('requestExtractors must be array');
-    else updates.requestExtractors = patch.requestExtractors.map((x) => String(x));
-  }
-
-  if (patch.responseExtractors !== undefined) {
-    if (!Array.isArray(patch.responseExtractors)) errors.push('responseExtractors must be array');
-    else updates.responseExtractors = patch.responseExtractors.map((x) => String(x));
-  }
-
-  if (patch.extractorParallelEnabled !== undefined || patch.extractorParallel !== undefined) {
-    const val = coerceBoolean(patch.extractorParallelEnabled ?? patch.extractorParallel);
-    if (val === undefined) errors.push('extractorParallelEnabled must be boolean');
-    else updates.extractorParallel = val;
-  }
-
-  if (patch.responseStreamEnabled !== undefined) {
-    const val = coerceBoolean(patch.responseStreamEnabled);
-    if (val === undefined) errors.push('responseStreamEnabled must be boolean');
-    else updates.responseStreamEnabled = val;
-  }
-  if (patch.responseStreamFinalEnabled !== undefined) {
-    const val = coerceBoolean(patch.responseStreamFinalEnabled);
-    if (val === undefined) errors.push('responseStreamFinalEnabled must be boolean');
-    else updates.responseStreamFinalEnabled = val;
-  }
-  if (patch.responseStreamCollectFullEnabled !== undefined) {
-    const val = coerceBoolean(patch.responseStreamCollectFullEnabled);
-    if (val === undefined) errors.push('responseStreamCollectFullEnabled must be boolean');
-    else updates.responseStreamCollectFullEnabled = val;
-  }
-
-  if (patch.responseStreamChunkGatingEnabled !== undefined) {
-    const val = coerceBoolean(patch.responseStreamChunkGatingEnabled);
-    if (val === undefined) errors.push('responseStreamChunkGatingEnabled must be boolean');
-    else updates.responseStreamChunkGatingEnabled = val;
-  }
-
-  if (patch.responseStreamChunkSize !== undefined) {
-    const val = coerceInteger(patch.responseStreamChunkSize);
-    if (val === undefined || val < 128 || val > 65536) errors.push('responseStreamChunkSize must be between 128 and 65536');
-    else updates.responseStreamChunkSize = val;
-  }
-  if (patch.responseStreamChunkOverlap !== undefined) {
-    const val = coerceInteger(patch.responseStreamChunkOverlap);
-    if (val === undefined || val < 0) errors.push('responseStreamChunkOverlap must be non-negative integer');
-    else updates.responseStreamChunkOverlap = val;
-  }
-
+  // Cross-field validation: overlap must be less than chunk size
   const size = updates.responseStreamChunkSize;
   const overlap = updates.responseStreamChunkOverlap;
   if (size !== undefined && overlap !== undefined && overlap >= size) {
@@ -147,7 +115,6 @@ export function resolveConfig(store, host) {
   const target = normalizeHostName(host);
   const defaultCfg = store.hostConfigs?.__default__ || {};
   const hostCfg = store.hostConfigs?.[target] || {};
-  // Inherit __default__ so new hosts get the same extractors/behaviour unless explicitly overridden.
   const merged = target === '__default__'
     ? { ...SCAN_CONFIG_DEFAULTS, ...defaultCfg }
     : { ...SCAN_CONFIG_DEFAULTS, ...defaultCfg, ...hostCfg };

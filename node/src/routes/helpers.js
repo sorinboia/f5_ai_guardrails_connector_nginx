@@ -1,4 +1,4 @@
-import { normalizeHostName } from '../config/validate.js';
+import { normalizeHostName } from '../config/hosts.js';
 
 export function getHeaderHost(request) {
   const hdr = request.headers['x-guardrails-config-host'];

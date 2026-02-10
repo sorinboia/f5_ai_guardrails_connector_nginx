@@ -1,11 +1,11 @@
-const MAX_ENTRIES = 50;
+import { COLLECTOR_MAX_ENTRIES } from '../config/constants.js';
 
 function clampCount(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
   const floored = Math.floor(num);
   if (floored < 0) return 0;
-  if (floored > MAX_ENTRIES) return MAX_ENTRIES;
+  if (floored > COLLECTOR_MAX_ENTRIES) return COLLECTOR_MAX_ENTRIES;
   return floored;
 }
 
@@ -21,8 +21,8 @@ function buildEntry(sample) {
 
 function trimEntries(list) {
   if (!Array.isArray(list)) return [];
-  if (list.length <= MAX_ENTRIES) return list;
-  return list.slice(list.length - MAX_ENTRIES);
+  if (list.length <= COLLECTOR_MAX_ENTRIES) return list;
+  return list.slice(list.length - COLLECTOR_MAX_ENTRIES);
 }
 
 export function scheduleCollection(store, count) {

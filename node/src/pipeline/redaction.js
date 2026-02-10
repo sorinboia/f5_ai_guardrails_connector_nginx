@@ -1,4 +1,5 @@
-import { extractSegments, getPathAccessor, safeJsonParse } from './utils.js';
+import { extractSegments, getPathAccessor } from './utils.js';
+import { safeJsonParse } from './safeJson.js';
 
 export function collectRedactionPlan(sbJson) {
   const results = (sbJson?.result?.scannerResults) || [];

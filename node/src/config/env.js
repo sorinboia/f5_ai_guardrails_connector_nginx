@@ -1,21 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 import { DynamicCertManager } from '../tls/dynamicCert.js';
-
-const DEFAULT_HTTP_PORT = 22080;
-const DEFAULT_HTTPS_PORT = 22443;
-const DEFAULT_MANAGEMENT_PORT = 22100;
-const DEFAULT_FORWARD_PROXY_PORT = 10000;
-const DEFAULT_CERT_PATH = '../certs/sideband-local.crt';
-const DEFAULT_KEY_PATH = '../certs/sideband-local.key';
-const DEFAULT_BACKEND_ORIGIN = 'https://api.openai.com';
-const DEFAULT_SIDEBAND_URL = 'https://www.us1.calypsoai.app/backend/v1/scans';
-const DEFAULT_SIDEBAND_TIMEOUT_MS = 5000;
-const DEFAULT_SIDEBAND_BEARER = '';
-const DEFAULT_SIDEBAND_UA = 'njs-sideband/1.0';
-const TESTS_LOCAL_SIDEBAND = 'http://127.0.0.1:18081/backend/v1/scans';
-const DEFAULT_STORE_PATH = 'var/guardrails_config.json';
-const DEFAULT_LOG_BUFFER_SIZE = 1000;
+import {
+  DEFAULT_HTTP_PORT,
+  DEFAULT_HTTPS_PORT,
+  DEFAULT_MANAGEMENT_PORT,
+  DEFAULT_FORWARD_PROXY_PORT,
+  DEFAULT_CERT_PATH,
+  DEFAULT_KEY_PATH,
+  DEFAULT_BACKEND_ORIGIN,
+  DEFAULT_SIDEBAND_URL,
+  DEFAULT_SIDEBAND_TIMEOUT_MS,
+  DEFAULT_SIDEBAND_BEARER,
+  DEFAULT_SIDEBAND_UA,
+  TESTS_LOCAL_SIDEBAND,
+  DEFAULT_STORE_PATH,
+  DEFAULT_LOG_BUFFER_SIZE,
+} from './constants.js';
 
 function fileExists(p) {
   try {

@@ -1,10 +1,9 @@
 import {
+  STREAM_CHUNK_SIZE_DEFAULT,
   STREAM_CHUNK_OVERLAP_DEFAULT,
-  STREAM_CHUNK_SIZE_DEFAULT
-} from './utils.js';
-
-const MIN_CHUNK_SIZE = 128;
-const MAX_CHUNK_SIZE = 65536;
+  STREAM_CHUNK_SIZE_MIN,
+  STREAM_CHUNK_SIZE_MAX
+} from '../config/constants.js';
 
 function normalizeMode(value) {
   const str = (value === undefined || value === null) ? 'buffer' : String(value).toLowerCase();
@@ -15,7 +14,7 @@ function normalizeMode(value) {
 function clampChunkSize(raw) {
   const num = Number(raw);
   const size = Number.isFinite(num) ? num : STREAM_CHUNK_SIZE_DEFAULT;
-  return Math.min(Math.max(size, MIN_CHUNK_SIZE), MAX_CHUNK_SIZE);
+  return Math.min(Math.max(size, STREAM_CHUNK_SIZE_MIN), STREAM_CHUNK_SIZE_MAX);
 }
 
 function clampOverlap(raw, chunkSize) {

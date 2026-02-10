@@ -5,7 +5,6 @@ import pino from 'pino';
 import { randomUUID } from 'crypto';
 import routes from './routes/index.js';
 import { loadConfigFromEnv, loadTlsOptions } from './config/env.js';
-import { createLogger } from './logging/logger.js';
 import { LogRingBuffer } from './logging/logBuffer.js';
 import { createLogCaptureHook } from './logging/logCapture.js';
 import { loadStore, saveStore, validateStoreShape } from './config/store.js';

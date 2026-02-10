@@ -1,36 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { normalizeHostList, normalizeHostName } from './hosts.js';
-
-const DEFAULT_STORE_PATH = path.resolve(process.env.CONFIG_STORE_PATH || 'var/guardrails_config.json');
-
-export const SCAN_CONFIG_DEFAULTS = {
-  inspectMode: 'both',
-  redactMode: 'both',
-  logLevel: 'info',
-  requestForwardMode: 'sequential',
-  backendOrigin: 'https://api.openai.com',
-  requestExtractor: '',
-  responseExtractor: '',
-  requestExtractors: [],
-  responseExtractors: [],
-  extractorParallel: false,
-  responseStreamEnabled: true,
-  responseStreamChunkSize: 2048,
-  responseStreamChunkOverlap: 128,
-  responseStreamFinalEnabled: true,
-  responseStreamCollectFullEnabled: false,
-  responseStreamBufferingMode: 'buffer',
-  responseStreamChunkGatingEnabled: false,
-};
+import { SCAN_CONFIG_DEFAULTS, DEFAULT_STORE_PATH } from './constants.js';
+import { isPlainObject } from '../utils/typeGuards.js';
 
 function ensureDirExists(filePath) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-}
-
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function defaultStore() {

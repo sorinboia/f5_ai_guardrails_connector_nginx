@@ -5,3 +5,11 @@ export function safeJson(value) {
     return '[unserializable]';
   }
 }
+
+export function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_err) {
+    return undefined;
+  }
+}

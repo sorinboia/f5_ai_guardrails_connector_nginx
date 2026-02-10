@@ -26,22 +26,8 @@ def read_json(body):
     return None
 
 
-class BackendHandler(BaseHTTPRequestHandler):
-  server_version = "TestsBackend/1.0"
-
-  def _send_sse(self, chunks, delay=0.05, include_heartbeat=False):
-    """Send a simple SSE stream with provided chunks."""
-    self.send_response(200)
-    self.send_header("content-type", "text/event-stream")
-    self.end_headers()
-    for chunk in chunks:
-      data = f"data: {chunk}\n\n".encode("utf-8")
-      self.wfile.write(data)
-      self.wfile.flush()
-      time.sleep(delay)
-      if include_heartbeat:
-        self.wfile.write(b": keep-alive\n\n")
-        self.wfile.flush()
+class BaseHandler(BaseHTTPRequestHandler):
+  """Base handler with shared utility methods."""
 
   def _read_body(self):
     length = int(self.headers.get("content-length", "0") or "0")
@@ -58,6 +44,28 @@ class BackendHandler(BaseHTTPRequestHandler):
         self.send_header(k, v)
     self.end_headers()
     self.wfile.write(body)
+
+  def log_message(self, fmt, *args):
+    # Quiet logging to keep test output clean.
+    return
+
+
+class BackendHandler(BaseHandler):
+  server_version = "TestsBackend/1.0"
+
+  def _send_sse(self, chunks, delay=0.05, include_heartbeat=False):
+    """Send a simple SSE stream with provided chunks."""
+    self.send_response(200)
+    self.send_header("content-type", "text/event-stream")
+    self.end_headers()
+    for chunk in chunks:
+      data = f"data: {chunk}\n\n".encode("utf-8")
+      self.wfile.write(data)
+      self.wfile.flush()
+      time.sleep(delay)
+      if include_heartbeat:
+        self.wfile.write(b": keep-alive\n\n")
+        self.wfile.flush()
 
   def do_POST(self):
     path = self.path.split("?", 1)[0]
@@ -121,26 +129,9 @@ class BackendHandler(BaseHTTPRequestHandler):
     }
     return self._send_json(response, status=200)
 
-  def log_message(self, fmt, *args):
-    # Quiet logging to keep test output clean.
-    return
 
-
-class GuardrailsHandler(BaseHTTPRequestHandler):
+class GuardrailsHandler(BaseHandler):
   server_version = "TestsGuardrails/1.0"
-
-  def _read_body(self):
-    length = int(self.headers.get("content-length", "0") or "0")
-    data = self.rfile.read(length) if length else b""
-    return data
-
-  def _send_json(self, payload, status=200):
-    body = json.dumps(payload).encode("utf-8")
-    self.send_response(status)
-    self.send_header("content-type", "application/json")
-    self.send_header("content-length", str(len(body)))
-    self.end_headers()
-    self.wfile.write(body)
 
   def _make_redaction_matches(self, extracted, kind):
     if kind == "fail":
@@ -173,9 +164,6 @@ class GuardrailsHandler(BaseHTTPRequestHandler):
       }
     }
     return self._send_json(response, status=200)
-
-  def log_message(self, fmt, *args):
-    return
 
 
 def serve_forever(server):

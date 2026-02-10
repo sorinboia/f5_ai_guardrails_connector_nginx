@@ -1,11 +1,6 @@
-import { resolveConfig } from '../config/validate.js';
-import { defaultStore } from '../config/store.js';
-import { sanitizeBlockingResponse } from '../routes/management.js';
-import { getHeaderHost } from '../routes/helpers.js';
+import { sanitizeBlockingResponse } from '../utils/helpers.js';
+import { ProxyContext, dropPassthroughStream } from './ProxyContext.js';
 import {
-  REQUEST_PATHS_DEFAULT,
-  RESPONSE_PATHS_DEFAULT,
-  isModeEnabled,
   parseStreamingBody,
   sliceTextChunks,
   buildStreamMessageBody,
@@ -13,32 +8,12 @@ import {
 import { processInspectionStage, evaluateMatchers, selectApiKeyForPattern } from './inspectionHelpers.js';
 import { recordSample } from './collector.js';
 import { buildRequestInit, fetchBuffered, fetchStream, startBuffered, withBody } from './backendClient.js';
-import { buildStreamPlan } from './streamPlan.js';
-
-function normalizeEnum(value, allowed, fallback, aliases = {}) {
-  if (value === undefined || value === null) return fallback;
-  const str = String(value).toLowerCase();
-  if (aliases[str]) return aliases[str];
-  if (allowed.includes(str)) return str;
-  return fallback;
-}
 
 function blockingResponseForKey(store, apiKeyName) {
   if (!apiKeyName) return sanitizeBlockingResponse();
   const record = (store.apiKeys || []).find((k) => k.name === apiKeyName);
   if (!record) return sanitizeBlockingResponse();
   return sanitizeBlockingResponse(record.blockingResponse);
-}
-
-function findPatterns(store, ids = [], context) {
-  const list = Array.isArray(ids) ? ids : [];
-  return list
-    .map((id) => (store.patterns || []).find((p) => p.id === id && (
-      p.context === context ||
-      (context === 'response' && p.context === 'response_stream') ||
-      (context === 'response_stream' && (p.context === 'response' || p.context === 'response_stream'))
-    )))
-    .filter(Boolean);
 }
 
 function buildRequestBody(request) {
@@ -49,134 +24,9 @@ function buildRequestBody(request) {
   return '';
 }
 
-function streamBackendPassthroughLegacy(url, request, bodyText, upstreamHost, caBundle, reply, inspectChunk, options = {}) {
-  const init = buildRequestInit(request, upstreamHost, caBundle);
-  return fetchStream(
-    url,
-    withBody(init, bodyText),
-    reply,
-    inspectChunk,
-    options,
-    request.log
-  );
-}
-
 export class ProxyHandler {
   constructor(fastify) {
     this.fastify = fastify;
-  }
-
-  buildExtractorConfig(config) {
-    const requestExtractorIds = Array.isArray(config.requestExtractors) && config.requestExtractors.length
-      ? config.requestExtractors
-      : (config.requestExtractor ? [config.requestExtractor] : []);
-    const responseExtractorIds = Array.isArray(config.responseExtractors) && config.responseExtractors.length
-      ? config.responseExtractors
-      : (config.responseExtractor ? [config.responseExtractor] : []);
-    return { requestExtractorIds, responseExtractorIds };
-  }
-
-  buildSidebandConfig(appCfg, request) {
-    return {
-      url: appCfg.sidebandUrl,
-      bearer: appCfg.sidebandBearer || '',
-      ua: appCfg.sidebandUa,
-      timeout: appCfg.sidebandTimeoutMs,
-      caBundle: appCfg.caBundle,
-      testsLocalOverride: appCfg.testsLocalSideband,
-      hostHeader: request.headers.host
-    };
-  }
-
-  dropPassthroughStream(request, reply, meta = {}) {
-    request.log.warn({ step: 'stream:passthrough_drop', ...meta });
-    if (!reply.raw.destroyed) reply.raw.destroy(new Error('response_stream_blocked'));
-  }
-
-  prepareContext(request, reply) {
-    const store = this.fastify.store || defaultStore();
-    const host = getHeaderHost(request);
-    const config = resolveConfig(store, host);
-    const appCfg = this.fastify.appConfig;
-    const stream = buildStreamPlan(config);
-    const { requestExtractorIds, responseExtractorIds } = this.buildExtractorConfig(config);
-
-    const headerInspect = normalizeEnum(request.headers['x-sideband-inspect'], ['off', 'request', 'response', 'both'], config.inspectMode);
-    const headerRedact = normalizeEnum(request.headers['x-sideband-redact'], ['off', 'request', 'response', 'both', 'on', 'true'], config.redactMode, { on: 'both', true: 'both' });
-    const headerForward = normalizeEnum(request.headers['x-sideband-forward'], ['sequential', 'parallel'], config.requestForwardMode);
-
-    const inspectMode = headerInspect || config.inspectMode;
-    const redactMode = headerRedact || config.redactMode;
-    const requestForwardMode = headerForward || config.requestForwardMode;
-
-    const requestPatterns = findPatterns(store, requestExtractorIds, 'request');
-    const responsePatterns = findPatterns(store, responseExtractorIds, 'response');
-
-    const inspectRequestEnabled = isModeEnabled(inspectMode, 'request');
-    const inspectResponseEnabled = isModeEnabled(inspectMode, 'response');
-    let redactRequestEnabled = isModeEnabled(redactMode, 'request');
-    let redactResponseEnabled = isModeEnabled(redactMode, 'response');
-
-    const extractorParallelEnabled = !!(config.extractorParallelEnabled ?? config.extractorParallel);
-    const wantParallel = requestForwardMode === 'parallel';
-    const parallelRequestExtractors = extractorParallelEnabled && requestPatterns.length > 0;
-    const parallelResponseExtractors = extractorParallelEnabled && responsePatterns.length > 0;
-
-    if (wantParallel && inspectRequestEnabled && redactRequestEnabled) {
-      request.log.info({ step: 'forward_mode:parallel_request_redaction_disabled' });
-      redactRequestEnabled = false;
-    }
-    if (parallelRequestExtractors && redactRequestEnabled) {
-      request.log.info({ step: 'extractors:parallel_request_disables_redaction' });
-      redactRequestEnabled = false;
-    }
-    if (parallelResponseExtractors && redactResponseEnabled) {
-      request.log.info({ step: 'extractors:parallel_response_disables_redaction' });
-      redactResponseEnabled = false;
-    }
-    if (!stream.redactionAllowed && redactResponseEnabled) {
-      request.log.info({ step: 'stream:redaction_disabled', reason: 'streaming responses are not mutated' });
-      redactResponseEnabled = false;
-    }
-    if (!stream.parallelAllowed && wantParallel) {
-      request.log.info({ step: 'forward_mode:passthrough_forces_sequential' });
-    }
-
-    const parallelForward = wantParallel && inspectRequestEnabled && !redactRequestEnabled && stream.parallelAllowed;
-
-    const upstreamUrl = new URL(request.raw.url || request.url || '/', config.backendOrigin || appCfg.backendOrigin);
-    const upstreamHost = upstreamUrl.host;
-    // Capture the original request URL (path + query) for pattern URL matching
-    const requestUrl = request.raw.url || request.url || '/';
-
-    return {
-      store,
-      config,
-      appCfg,
-      stream,
-      headerInspect,
-      headerRedact,
-      headerForward,
-      inspectMode,
-      redactMode,
-      requestForwardMode,
-      requestPatterns,
-      responsePatterns,
-      inspectRequestEnabled,
-      inspectResponseEnabled,
-      redactRequestEnabled,
-      redactResponseEnabled,
-      extractorParallelEnabled,
-      parallelRequestExtractors,
-      parallelResponseExtractors,
-      wantParallel,
-      parallelForward,
-      upstreamUrl,
-      upstreamHost,
-      requestUrl,
-      sideband: this.buildSidebandConfig(appCfg, request),
-      dropPassthroughStream: (meta) => this.dropPassthroughStream(request, reply, meta)
-    };
   }
 
   sendBlockingResponse(reply, block) {
@@ -188,20 +38,22 @@ export class ProxyHandler {
     return processInspectionStage({
       phase: 'request',
       body: reqBodyText,
-      fallbackPaths: ctx.config.requestPaths || REQUEST_PATHS_DEFAULT,
-      patternsList: ctx.requestPatterns,
-      inspectEnabled: ctx.inspectRequestEnabled,
-      redactEnabled: ctx.redactRequestEnabled,
-      parallelExtractors: ctx.parallelRequestExtractors,
+      fallbackPaths: ctx.requestPaths,
+      patternsList: ctx.patterns.request,
+      inspectEnabled: ctx.flags.inspectRequestEnabled,
+      redactEnabled: ctx.flags.redactRequestEnabled,
+      parallelExtractors: ctx.flags.parallelRequestExtractors,
       sideband: ctx.sideband,
       apiKeys: ctx.store.apiKeys,
       log: request.log,
-      requestUrl: ctx.requestUrl
+      requestUrl: ctx.backend.requestUrl
     });
   }
 
   buildLiveInspectChunk(ctx, request) {
-    if (!ctx.stream.passthrough || !ctx.inspectResponseEnabled || !ctx.responsePatterns.length) return null;
+    if (!ctx.stream.passthrough || !ctx.flags.inspectResponseEnabled || !ctx.patterns.response.length) {
+      return null;
+    }
     let lastEvents = 0;
     return async (bodySoFar) => {
       const parsed = parseStreamingBody(bodySoFar);
@@ -211,14 +63,14 @@ export class ProxyHandler {
         phase: 'response_stream',
         body: buildStreamMessageBody(parsed.assembled),
         fallbackPaths: [],
-        patternsList: ctx.responsePatterns,
+        patternsList: ctx.patterns.response,
         inspectEnabled: true,
         redactEnabled: false,
         parallelExtractors: false,
         sideband: ctx.sideband,
         apiKeys: ctx.store.apiKeys,
         log: request.log,
-        requestUrl: ctx.requestUrl
+        requestUrl: ctx.backend.requestUrl
       });
       if (liveResult.status === 'blocked') {
         return {
@@ -240,14 +92,14 @@ export class ProxyHandler {
         phase: 'response_stream',
         body: buildStreamMessageBody(chunks[i]),
         fallbackPaths: [],
-        patternsList: ctx.responsePatterns,
-        inspectEnabled: ctx.inspectResponseEnabled,
+        patternsList: ctx.patterns.response,
+        inspectEnabled: ctx.flags.inspectResponseEnabled,
         redactEnabled: false,
         parallelExtractors: false,
         sideband: ctx.sideband,
         apiKeys: ctx.store.apiKeys,
         log: request.log,
-        requestUrl: ctx.requestUrl
+        requestUrl: ctx.backend.requestUrl
       });
       if (chunkResult.status === 'blocked') {
         return {
@@ -263,7 +115,7 @@ export class ProxyHandler {
   }
 
   async inspectStreamingPhase(ctx, request, reply, streamParsed) {
-    if (!ctx.stream.enabled || !streamParsed.assembled || !ctx.inspectResponseEnabled || !ctx.responsePatterns.length) {
+    if (!ctx.stream.enabled || !streamParsed.assembled || !ctx.flags.inspectResponseEnabled || !ctx.patterns.response.length) {
       return 'skipped';
     }
 
@@ -272,21 +124,21 @@ export class ProxyHandler {
         phase: 'response_stream',
         body: buildStreamMessageBody(streamParsed.assembled),
         fallbackPaths: [],
-        patternsList: ctx.responsePatterns,
-        inspectEnabled: ctx.inspectResponseEnabled,
+        patternsList: ctx.patterns.response,
+        inspectEnabled: ctx.flags.inspectResponseEnabled,
         redactEnabled: false,
         parallelExtractors: false,
         sideband: ctx.sideband,
         apiKeys: ctx.store.apiKeys,
         log: request.log,
-        requestUrl: ctx.requestUrl
+        requestUrl: ctx.backend.requestUrl
       });
       if (fullResult.status === 'blocked') {
         if (ctx.stream.blockingAllowed) {
           const block = blockingResponseForKey(ctx.store, fullResult.apiKeyName);
           this.sendBlockingResponse(reply, block);
         } else {
-          ctx.dropPassthroughStream({ api_key_name: fullResult.apiKeyName, pattern_id: fullResult.patternId, reason: 'full_stream_blocked' });
+          dropPassthroughStream(ctx, { api_key_name: fullResult.apiKeyName, pattern_id: fullResult.patternId, reason: 'full_stream_blocked' });
         }
         return 'blocked';
       }
@@ -299,7 +151,7 @@ export class ProxyHandler {
         const block = blockingResponseForKey(ctx.store, streamResult.apiKeyName);
         this.sendBlockingResponse(reply, block);
       } else {
-        ctx.dropPassthroughStream({
+        dropPassthroughStream(ctx, {
           api_key_name: streamResult.apiKeyName,
           pattern_id: streamResult.patternId,
           reason: 'stream_chunk_blocked',
@@ -318,15 +170,15 @@ export class ProxyHandler {
     const responseResult = await processInspectionStage({
       phase: ctx.stream.enabled ? 'response_stream' : 'response',
       body: respBodyForInspection,
-      fallbackPaths: ctx.stream.enabled ? [] : (ctx.config.responsePaths || RESPONSE_PATHS_DEFAULT),
-      patternsList: ctx.responsePatterns,
-      inspectEnabled: ctx.inspectResponseEnabled,
-      redactEnabled: ctx.redactResponseEnabled,
-      parallelExtractors: ctx.parallelResponseExtractors,
+      fallbackPaths: ctx.stream.enabled ? [] : ctx.responsePaths,
+      patternsList: ctx.patterns.response,
+      inspectEnabled: ctx.flags.inspectResponseEnabled,
+      redactEnabled: ctx.flags.redactResponseEnabled,
+      parallelExtractors: ctx.flags.parallelResponseExtractors,
       sideband: ctx.sideband,
       apiKeys: ctx.store.apiKeys,
       log: request.log,
-      requestUrl: ctx.requestUrl
+      requestUrl: ctx.backend.requestUrl
     });
 
     if (responseResult.status === 'blocked') {
@@ -334,7 +186,7 @@ export class ProxyHandler {
         const block = blockingResponseForKey(ctx.store, responseResult.apiKeyName);
         this.sendBlockingResponse(reply, block);
       } else {
-        ctx.dropPassthroughStream({ api_key_name: responseResult.apiKeyName, pattern_id: responseResult.patternId, reason: 'final_stream_blocked' });
+        dropPassthroughStream(ctx, { api_key_name: responseResult.apiKeyName, pattern_id: responseResult.patternId, reason: 'final_stream_blocked' });
       }
       return 'blocked';
     }
@@ -360,16 +212,16 @@ export class ProxyHandler {
   }
 
   async handle(request, reply) {
-    const ctx = this.prepareContext(request, reply);
+    const ctx = new ProxyContext(this.fastify, request, reply);
     let reqBodyText = buildRequestBody(request);
-    const backendInit = buildRequestInit(request, ctx.upstreamHost, ctx.appCfg.caBundle);
+    const backendInit = buildRequestInit(request, ctx.backend.upstreamHost, ctx.appCfg.caBundle);
     let backendPromise = null;
     let backendAbort = null;
 
     try {
-      if (ctx.parallelForward) {
+      if (ctx.flags.parallelForward) {
         const { promise, abort } = startBuffered(
-          ctx.upstreamUrl.toString(),
+          ctx.backend.upstreamUrl.toString(),
           withBody(backendInit, reqBodyText),
           request.log
         );
@@ -385,7 +237,7 @@ export class ProxyHandler {
       }
 
       if (requestResult.body !== undefined && requestResult.body !== reqBodyText) {
-        if (ctx.parallelForward) {
+        if (ctx.flags.parallelForward) {
           request.log.warn({ step: 'forward_mode:redaction_ignored', note: 'request already dispatched upstream' });
         } else {
           reqBodyText = requestResult.body;
@@ -398,7 +250,7 @@ export class ProxyHandler {
 
       const backend = ctx.stream.passthrough
         ? await fetchStream(
-            ctx.upstreamUrl.toString(),
+            ctx.backend.upstreamUrl.toString(),
             requestInit,
             reply,
             liveInspectChunk,
@@ -407,7 +259,7 @@ export class ProxyHandler {
           )
         : backendPromise
           ? await backendPromise
-          : await fetchBuffered(ctx.upstreamUrl.toString(), requestInit, request.log);
+          : await fetchBuffered(ctx.backend.upstreamUrl.toString(), requestInit, request.log);
 
       const respBodyRaw = typeof backend.body === 'string' ? backend.body : (backend.body ? String(backend.body) : '');
       backend.body = respBodyRaw;
@@ -436,7 +288,7 @@ export class ProxyHandler {
       request.log.error({ step: 'proxy:error', error: err?.message || String(err) });
       try {
         const fallback = await fetchBuffered(
-          ctx.upstreamUrl.toString(),
+          ctx.backend.upstreamUrl.toString(),
           withBody(backendInit, reqBodyText),
           request.log
         );
@@ -457,9 +309,7 @@ export function buildProxyHandler(fastify) {
   return handler.handle.bind(handler);
 }
 
-// Expose matcher helpers for targeted unit tests without altering runtime API surface.
 export {
   evaluateMatchers as _evaluateMatchers,
-  selectApiKeyForPattern as _selectApiKeyForPattern,
-  streamBackendPassthroughLegacy as _streamBackendPassthrough
+  selectApiKeyForPattern as _selectApiKeyForPattern
 };

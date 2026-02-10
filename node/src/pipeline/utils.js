@@ -1,17 +1,18 @@
-import { safeJson } from './safeJson.js';
+import { safeJson, safeJsonParse } from './safeJson.js';
+import {
+  REQUEST_PATHS_DEFAULT,
+  RESPONSE_PATHS_DEFAULT,
+  STREAM_CHUNK_SIZE_DEFAULT,
+  STREAM_CHUNK_OVERLAP_DEFAULT,
+} from '../config/constants.js';
 
-export const REQUEST_PATHS_DEFAULT = ['.messages[-1].content'];
-export const RESPONSE_PATHS_DEFAULT = ['.message.content'];
-export const STREAM_CHUNK_SIZE_DEFAULT = 2048;
-export const STREAM_CHUNK_OVERLAP_DEFAULT = 128;
-
-export function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch (_err) {
-    return undefined;
-  }
-}
+// Re-export constants for modules that import from utils.js
+export {
+  REQUEST_PATHS_DEFAULT,
+  RESPONSE_PATHS_DEFAULT,
+  STREAM_CHUNK_SIZE_DEFAULT,
+  STREAM_CHUNK_OVERLAP_DEFAULT,
+};
 
 export function isModeEnabled(mode, target) {
   if (!mode) return false;

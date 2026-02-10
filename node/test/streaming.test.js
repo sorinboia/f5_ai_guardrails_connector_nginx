@@ -1,7 +1,6 @@
 import { PassThrough, Readable } from 'stream';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createSseChunkTee } from '../src/pipeline/streaming.js';
-import { _streamBackendPassthrough } from '../src/pipeline/proxyPipeline.js';
+import { fetchStream } from '../src/pipeline/backendClient.js';
 
 var mockUndiciRequest;
 
@@ -26,31 +25,7 @@ beforeEach(() => {
   mockUndiciRequest.mockReset();
 });
 
-describe('createSseChunkTee', () => {
-  it('passes through data while counting overlapping chunks', async () => {
-    const logger = { info: vi.fn() };
-    const tee = createSseChunkTee({ chunkSize: 4, overlap: 1, logger });
-
-    const output = [];
-    tee.on('data', (buf) => output.push(buf.toString('utf8')));
-
-    tee.write('abcd');
-    tee.write('ef');
-    tee.write('ghij');
-    tee.end();
-
-    await new Promise((resolve) => tee.on('finish', resolve));
-
-    // Expect overlapping chunk windowing: buffer lengths trigger 4 chunks total.
-    expect(logger.info).toHaveBeenCalledWith(
-      { step: 'sse_chunk_probe', chunkSize: 4, overlap: 1, chunkCount: 4, bytesSeen: 10 },
-      'SSE stream chunked (probe)'
-    );
-    expect(output.join('')).toBe('abcdefghij');
-  });
-});
-
-describe('_streamBackendPassthrough chunk gating', () => {
+describe('fetchStream chunk gating', () => {
   it('waits for live inspect before forwarding chunks when gating is enabled', async () => {
     const bodyStream = Readable.from(['chunk-1']);
     mockUndiciRequest.mockResolvedValue({ statusCode: 200, headers: {}, body: bodyStream });
@@ -73,10 +48,16 @@ describe('_streamBackendPassthrough chunk gating', () => {
       send: (stream) => stream.pipe(client),
       raw: client
     };
-    const request = { headers: {}, method: 'GET', log: fakeLog() };
+    const log = fakeLog();
 
-    const promise = _streamBackendPassthrough('http://example.com', request, '', 'example.com', null, reply, inspect, { gateChunks: true });
-    const result = await promise;
+    const result = await fetchStream(
+      'http://example.com',
+      { method: 'GET', headers: { host: 'example.com' } },
+      reply,
+      inspect,
+      { gateChunks: true },
+      log
+    );
 
     expect(inspect).toHaveBeenCalledTimes(1);
     expect(order).toEqual([
@@ -107,9 +88,15 @@ describe('_streamBackendPassthrough chunk gating', () => {
       raw: client
     };
     const log = fakeLog();
-    const request = { headers: {}, method: 'GET', log };
 
-    const result = await _streamBackendPassthrough('http://example.com', request, '', 'example.com', null, reply, inspect, { gateChunks: true });
+    const result = await fetchStream(
+      'http://example.com',
+      { method: 'GET', headers: { host: 'example.com' } },
+      reply,
+      inspect,
+      { gateChunks: true },
+      log
+    );
 
     expect(inspect).toHaveBeenCalledTimes(2);
     expect(received.join('')).toBe('ok');
